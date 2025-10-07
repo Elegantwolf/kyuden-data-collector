@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Kyuden daily collector (user)
+
+[Timer]
+OnCalendar=*-*-* 01:05:00
+RandomizedDelaySec=10m
+Persistent=true
+AccuracySec=1m
+Unit=kyuden-daily.service
+
+[Install]
+WantedBy=timers.target

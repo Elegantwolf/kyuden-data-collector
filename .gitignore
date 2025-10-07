@@ -233,3 +233,4 @@ kyuden_usage.db-shm
 *.db-journal
 *.db-wal
 *.db-shm
+.ms-playwright

@@ -1,9 +1,4 @@
-"""
-九州电力网站爬虫 - 获取每日/每小时用电量数据
-作者：Assistant
-日期：2025-09-01 (refactored with mode selection)
-"""
-
+# main module for Kyuden electricity usage scraper
 import asyncio
 import json
 import html
@@ -374,7 +369,7 @@ async def main():
     parser.add_argument('--mode', '-m', choices=['daily','hourly','both'], default='both')
     parser.add_argument('--format', '-f', choices=['csv','json','both','none'], default='none')  # 支持 none
     parser.add_argument('--hourly-date', help='小时数据的日期归属，ISO 格式 YYYY-MM-DD', default=None)
-    parser.add_argument('--storage-state', default=os.getenv('KYUDEN_STATE','.kyuden_storage_state.json'),
+    parser.add_argument('--storage-state', default=os.getenv('KYUDEN_STATE','state/.storage_state.json'),
                         help='登录状态文件路径（storage state）')
     parser.add_argument('--max-login-retries', type=int, default=int(os.getenv('KYUDEN_MAX_LOGIN_RETRIES','2')))
     parser.add_argument('--headless', action='store_true', help='Run browser headless (default true)')

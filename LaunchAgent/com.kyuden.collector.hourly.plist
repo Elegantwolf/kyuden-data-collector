@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.kyuden.collector.hourly</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-c</string>
+    <string>mkdir -p "$HOME/kyuden-data-collector/logs" "$HOME/kyuden-data-collector/data" "$HOME/kyuden-data-collector/state" "$HOME/kyuden-data-collector/.ms-playwright" && export KYUDEN_STATE="$HOME/kyuden-data-collector/state/storage_state.json" PLAYWRIGHT_BROWSERS_PATH="$HOME/kyuden-data-collector/.ms-playwright" TZ=Asia/Tokyo && exec "$HOME/kyuden-data-collector/.venv/bin/python" "$HOME/kyuden-data-collector/collector.py" -m hourly --db "$HOME/kyuden-data-collector/data/kyuden.sqlite" >> "$HOME/kyuden-data-collector/logs/kyuden-hourly.log" 2>&1</string>
+  </array>
+
+  <!-- 可保留账号在此，或改为在命令里 source $HOME/kyuden-data-collector/secrets/kyuden.env -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>KYUDEN_USER</key><string>your_username</string>
+    <key>KYUDEN_PASS</key><string>your_password</string>
+    <key>KYUDEN_MAX_LOGIN_RETRIES</key><string>2</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Minute</key><integer>5</integer>
+  </dict>
+
+  <key>KeepAlive</key><false/>
+  <key>RunAtLoad</key><false/>
+</dict>
+</plist>

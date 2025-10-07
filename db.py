@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Iterable, Dict, Any, Optional, List
 from datetime import datetime, date
 
-DEFAULT_DB_PATH = Path("kyuden_usage.db")
+DEFAULT_DB_PATH = Path("/data/kyuden_usage.db")
 
 DDL_STATEMENTS = [
     """

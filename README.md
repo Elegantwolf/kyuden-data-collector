@@ -1,3 +1,29 @@
+启用步骤（用户级）
+
+目录与权限
+mkdir -p ~/kyuden-data-collector/{data,run,state,secrets,systemd}
+chmod 700 ~/kyuden-data-collector/secrets
+chmod 600 ~/kyuden-data-collector/secrets/kyuden.env
+首次验证依赖
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+playwright install chromium
+链接与启用
+systemctl --user daemon-reload
+systemctl --user link ~/kyuden-data-collector/systemd/kyuden-hourly.service
+systemctl --user link ~/kyuden-data-collector/systemd/kyuden-hourly.timer
+systemctl --user link ~/kyuden-data-collector/systemd/kyuden-daily.service
+systemctl --user link ~/kyuden-data-collector/systemd/kyuden-daily.timer
+systemctl --user enable --now kyuden-hourly.timer kyuden-daily.timer
+日志与手动触发
+journalctl --user -u kyuden-hourly.service -n 200 -f
+systemctl --user start kyuden-hourly.service
+开机无人登录也运行（可选）
+loginctl enable-linger "$USER"
+
+
+
+
 # Kyuden Data Collector (九州电力数据收集器)
 
 一个用于自动收集九州电力网站每日用电量数据的爬虫工具。使用 Python + Playwright 实现，支持模拟登录和数据提取。
