@@ -27,6 +27,7 @@ class KyudenScraper:
         self.context = None
         self.page = None
         self._playwright = None
+        self._headless = True
 
         # 新增：登录状态复用与告警配置
         self.storage_state_path = Path(storage_state_path) if storage_state_path else None
@@ -40,6 +41,7 @@ class KyudenScraper:
             headless=headless,
             args=['--no-first-run', '--disable-dev-shm-usage'] if headless else []
         )
+        self._headless = headless
         storage_state = None
         if use_storage_state and self.storage_state_path and self.storage_state_path.exists():
             storage_state = str(self.storage_state_path)
@@ -142,6 +144,18 @@ class KyudenScraper:
             logger.info(f"尝试显式登录（第 {attempt}/{self.max_login_retries} 次）")
             if await self.login(username, password):
                 return True
+
+            if attempt == 1 and self.storage_state_path:
+                logger.warning("使用 storage state 登录失败，回退到无状态登录并刷新 storage_state.json")
+                try:
+                    if self.storage_state_path.exists():
+                        self.storage_state_path.unlink()
+                        logger.info(f"已删除失效的 storage state: {self.storage_state_path}")
+                except Exception as remove_err:
+                    logger.warning(f"删除 storage state 失败: {remove_err}")
+                await self.close()
+                await self.init_browser(headless=self._headless, use_storage_state=False)
+
             await asyncio.sleep(min(2 * attempt, 5))  # 退避
 
         await self._notify_alert("登录失败，达到最大重试次数", {"stage": "login"})
