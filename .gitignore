@@ -234,3 +234,5 @@ kyuden_usage.db-shm
 *.db-wal
 *.db-shm
 .ms-playwright
+state/
+.storage_state.json

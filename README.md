@@ -102,12 +102,18 @@ Each record includes:
 - `usage_kwh`: Usage in kWh
 - `timestamp`: Data retrieval time
 
-
 ## Security & Notice
 
 - Only use with your own Kyuden account and data.
 - Keep credentials safe; never commit secrets to version control.
 - Respect Kyuden’s terms of service and avoid excessive scraping.
+
+## Future Plans
+
+- Data visualization
+- Web data acquisition
+- Home Assistant integration
+- Email Alarm
 
 ## Contributing
 
