@@ -2,6 +2,7 @@
 import asyncio
 import json
 import html
+import random
 from datetime import datetime, date
 import pandas as pd
 from playwright.async_api import async_playwright
@@ -34,23 +35,83 @@ class KyudenScraper:
         self.alert_handler = alert_handler
         self.max_login_retries = max(1, max_login_retries)
         
+    async def _random_delay(self, min_sec: float = 1.0, max_sec: float = 3.0):
+        """随机延迟，模拟真实用户操作节奏"""
+        delay = random.uniform(min_sec, max_sec)
+        await asyncio.sleep(delay)
+        
+    async def _simulate_human_typing(self, element, text: str):
+        """模拟人类输入：逐字输入+随机延迟"""
+        await element.click()
+        await self._random_delay(0.1, 0.3)
+        for char in text:
+            await element.type(char, delay=random.uniform(50, 150))
+        await self._random_delay(0.3, 0.8)
+        
+    async def _simulate_mouse_movement(self):
+        """模拟鼠标随机移动"""
+        try:
+            viewport_size = self.page.viewport_size
+            if viewport_size:
+                x = random.randint(100, viewport_size['width'] - 100)
+                y = random.randint(100, viewport_size['height'] - 100)
+                await self.page.mouse.move(x, y)
+                await self._random_delay(0.2, 0.5)
+        except Exception as e:
+            logger.debug(f"鼠标移动模拟失败: {e}")
+        
     async def init_browser(self, headless=True, use_storage_state: bool = True):
         """初始化浏览器（可加载 storage state 以复用登录态）"""
         self._playwright = await async_playwright().start()
+        
+        # 使用更真实的浏览器配置
         self.browser = await self._playwright.chromium.launch(
             headless=headless,
-            args=['--no-first-run', '--disable-dev-shm-usage'] if headless else []
+            args=[
+                '--disable-blink-features=AutomationControlled',  # 隐藏自动化特征
+                '--no-first-run',
+                '--disable-dev-shm-usage',
+                '--disable-infobars',
+                '--window-size=1920,1080',
+            ] if headless else [
+                '--disable-blink-features=AutomationControlled',
+                '--window-size=1920,1080',
+            ]
         )
         self._headless = headless
+        
         storage_state = None
         if use_storage_state and self.storage_state_path and self.storage_state_path.exists():
             storage_state = str(self.storage_state_path)
             logger.info(f"加载登录状态: {self.storage_state_path}")
 
+        # 更真实的 User-Agent 和浏览器指纹
         self.context = await self.browser.new_context(
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-            storage_state=storage_state
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={'width': 1920, 'height': 1080},
+            locale='ja-JP',
+            timezone_id='Asia/Tokyo',
+            storage_state=storage_state,
+            # 添加更多真实浏览器特征
+            extra_http_headers={
+                'Accept-Language': 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            }
         )
+        
+        # 注入脚本隐藏 webdriver 特征
+        await self.context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5]
+            });
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['ja-JP', 'ja', 'en-US', 'en']
+            });
+        """)
+        
         self.page = await self.context.new_page()
         logger.info(f"浏览器初始化完成 (headless={headless}, use_storage_state={bool(storage_state)})")
 
@@ -66,10 +127,10 @@ class KyudenScraper:
                 logger.error(f"报警回调执行失败: {e}")
 
     async def is_logged_in(self) -> bool:
-
         try:
             await self.page.goto(self.base_url+"/member/account", timeout=10000)
             await self.page.wait_for_load_state('domcontentloaded')
+            await self._random_delay(1, 2)  # 随机等待
             await self.page.wait_for_selector('button.fs-top_card__detail_button.-hourly, button.fs-top_card__detail_button.-daily',
                     timeout=2000
                 )
@@ -84,28 +145,55 @@ class KyudenScraper:
             logger.info("开始登录...")
             await self.page.goto(self.login_url)
             await self.page.wait_for_load_state('domcontentloaded')
-            await asyncio.sleep(1)  # 等待 JS 渲染
+            
+            # 随机等待，模拟用户阅读页面
+            await self._random_delay(2, 4)
+            
+            # 模拟鼠标移动
+            await self._simulate_mouse_movement()
 
             email_input = await self.page.query_selector('input[name="body_1$TxtKaiinId"]')
             if not email_input:
                 logger.error("未找到邮箱输入框")
                 await self.page.screenshot(path='email_input_not_found.png')
                 return False
-            await email_input.fill(username)
+            
+            # 模拟人类输入
+            await self._simulate_human_typing(email_input, username)
+            
+            # 随机延迟
+            await self._random_delay(0.5, 1.5)
+            
+            # 再次模拟鼠标移动
+            await self._simulate_mouse_movement()
 
             password_input = await self.page.query_selector('input[name="body_1$TxtPasswd"]')
             if not password_input:
                 logger.error("未找到密码输入框")
                 await self.page.screenshot(path='password_input_not_found.png')
                 return False
-            await password_input.fill(password)
-            await asyncio.sleep(1)
+            
+            # 模拟人类输入密码
+            await self._simulate_human_typing(password_input, password)
+            
+            # 登录前随机等待
+            await self._random_delay(1, 2)
 
             submit_button = await self.page.query_selector('button.fs-submit')
             if not submit_button:
                 logger.error("未找到登录提交按钮")
                 await self.page.screenshot(path='submit_button_not_found.png')
                 return False
+            
+            # 模拟鼠标移动到按钮
+            box = await submit_button.bounding_box()
+            if box:
+                await self.page.mouse.move(
+                    box['x'] + box['width'] / 2,
+                    box['y'] + box['height'] / 2
+                )
+                await self._random_delay(0.3, 0.8)
+            
             await submit_button.click()
 
             try:
@@ -113,6 +201,9 @@ class KyudenScraper:
             except Exception:
                 # 有时不会稳定跳转，尽量容错
                 await asyncio.sleep(1)
+
+            # 登录后等待，模拟用户查看页面
+            await self._random_delay(2, 4)
 
             # 登录后再做一次 dashboard 检查
             if not await self.is_logged_in():
@@ -156,16 +247,20 @@ class KyudenScraper:
                 await self.close()
                 await self.init_browser(headless=self._headless, use_storage_state=False)
 
-            await asyncio.sleep(min(2 * attempt, 5))  # 退避
+            # 增加重试间隔，避免频繁请求
+            await asyncio.sleep(min(5 * attempt, 15))
 
         await self._notify_alert("登录失败，达到最大重试次数", {"stage": "login"})
         return False
             
     async def get_daily_usage_data(self):
         """获取每日用电量数据"""
+        await self._random_delay(1, 2)  # 随机等待
         await self.page.goto(self.base_url+"/member/account", timeout=10000)
+        await self._random_delay(1, 2)  # 模拟用户查看页面
         await self.page.click('button.fs-top_card__detail_button.-daily')
         await self.page.wait_for_load_state('domcontentloaded')
+        await self._random_delay(1, 3)  # 等待数据加载
         logger.info("导航到每日图表页面完成")
         try:
             data_element = await self.page.query_selector('input[name="body_0$Data"]')
@@ -184,9 +279,12 @@ class KyudenScraper:
     async def get_hourly_usage_data(self, target_date: Optional[date] = None):
         """获取每小时用电量数据（允许传入目标日期归属）"""
         await self.page.wait_for_load_state('networkidle')
+        await self._random_delay(1, 2)  # 随机等待
         await self.page.goto(self.base_url+"/member/account", timeout=10000)
+        await self._random_delay(1, 2)  # 模拟用户查看页面
         await self.page.click('button.fs-top_card__detail_button.-hourly')
         await self.page.wait_for_load_state('domcontentloaded')
+        await self._random_delay(1, 3)  # 等待数据加载
         logger.info("导航到每小时图表页面完成")
         try:
             data_element = await self.page.query_selector('input[name="body_0$Data"]')
