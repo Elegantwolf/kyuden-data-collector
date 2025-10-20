@@ -21,9 +21,11 @@ Developed as part of my personal exploration in automation and data handling.
 
 ## Quick Setup
 
-### 1. Prepare Directories and Permissions
+### 1. Clone the Project, Prepare Directories and Permissions
 
 ```bash
+cd ~
+git clone https://github.com/Elegantwolf/kyuden-data-collector.git
 mkdir -p ~/kyuden-data-collector/{data,run,state,secrets,systemd,LaunchAgent,logs}
 chmod 700 ~/kyuden-data-collector/secrets
 chmod 600 ~/kyuden-data-collector/secrets/kyuden.env
@@ -36,8 +38,20 @@ cd ~/kyuden-data-collector
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+```
+
+#### Playwright Browser Installation (Custom Cache Location)
+
+By default, Playwright installs browser binaries in `~/Library/Caches/ms-playwright` (macOS) or `~/.cache/ms-playwright` (Linux).  
+To keep all project data in one place, set a custom cache directory:
+
+```bash
+mkdir -p ~/kyuden-data-collector/ms-playwright
+export PLAYWRIGHT_BROWSERS_PATH="$HOME/kyuden-data-collector/ms-playwright"
 playwright install chromium
 ```
+
+> This ensures all Playwright browser files are stored inside your project folder for easier data management.
 
 ### 3. Configure Credentials
 
