@@ -41,9 +41,17 @@ class KyudenScraper:
         await asyncio.sleep(delay)
         
     async def _simulate_human_typing(self, element, text: str):
-        """模拟人类输入：逐字输入+随机延迟"""
+        """模拟人类输入：先清空输入框，再逐字输入+随机延迟"""
         await element.click()
         await self._random_delay(0.1, 0.3)
+        
+        # 先清空输入框（模拟 Ctrl+A 或 Cmd+A 然后删除）
+        await element.click(click_count=3)  # 三击全选文本
+        await self._random_delay(0.1, 0.2)
+        await element.press('Backspace')  # 删除选中内容
+        await self._random_delay(0.2, 0.4)
+        
+        # 逐字输入
         for char in text:
             await element.type(char, delay=random.uniform(50, 150))
         await self._random_delay(0.3, 0.8)
