@@ -9,15 +9,22 @@ from playwright.async_api import async_playwright
 import logging
 from pathlib import Path
 from typing import Optional, Callable, Awaitable, Dict, Any, Union
+from urllib.parse import urlparse
 
 # 设置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+
+class AuthenticationRequiredError(RuntimeError):
+    """The persisted browser profile must be authenticated by a human."""
+
 class KyudenScraper:
     def __init__(
         self,
         storage_state_path: Optional[Union[str, Path]] = None,
+        profile_dir: Optional[Union[str, Path]] = None,
+        browser_channel: Optional[str] = "chrome",
         alert_handler: Optional[Callable[[str, Dict[str, Any]], Union[None, Awaitable[None]]]] = None,
         max_login_retries: int = 2,
     ):
@@ -29,9 +36,12 @@ class KyudenScraper:
         self.page = None
         self._playwright = None
         self._headless = True
+        self._persistent_context = False
 
         # 新增：登录状态复用与告警配置
         self.storage_state_path = Path(storage_state_path) if storage_state_path else None
+        self.profile_dir = Path(profile_dir) if profile_dir else None
+        self.browser_channel = browser_channel
         self.alert_handler = alert_handler
         self.max_login_retries = max(1, max_login_retries)
         
@@ -69,57 +79,55 @@ class KyudenScraper:
             logger.debug(f"鼠标移动模拟失败: {e}")
         
     async def init_browser(self, headless=True, use_storage_state: bool = True):
-        """初始化浏览器（可加载 storage state 以复用登录态）"""
+        """初始化浏览器。
+
+        优先使用独立的持久化 Chrome profile。它保存完整浏览器会话，比只复制
+        cookies/localStorage 的 storage state 更适合需要长期可信会话的网站。
+        """
         self._playwright = await async_playwright().start()
-        
-        # 使用更真实的浏览器配置
-        self.browser = await self._playwright.chromium.launch(
-            headless=headless,
-            args=[
-                '--disable-blink-features=AutomationControlled',  # 隐藏自动化特征
-                '--no-first-run',
-                '--disable-dev-shm-usage',
-                '--disable-infobars',
-                '--window-size=1920,1080',
-            ] if headless else [
-                '--disable-blink-features=AutomationControlled',
-                '--window-size=1920,1080',
-            ]
-        )
         self._headless = headless
+
+        common_options = {
+            "headless": headless,
+            "locale": "ja-JP",
+            "timezone_id": "Asia/Tokyo",
+        }
+
+        if self.profile_dir:
+            self.profile_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            launch_options = dict(common_options)
+            if self.browser_channel:
+                launch_options["channel"] = self.browser_channel
+            self.context = await self._playwright.chromium.launch_persistent_context(
+                user_data_dir=str(self.profile_dir),
+                **launch_options,
+            )
+            self.browser = self.context.browser
+            self._persistent_context = True
+            self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+            logger.info(
+                "持久化浏览器初始化完成 (headless=%s, profile=%s, channel=%s)",
+                headless,
+                self.profile_dir,
+                self.browser_channel or "chromium",
+            )
+            return
         
         storage_state = None
         if use_storage_state and self.storage_state_path and self.storage_state_path.exists():
             storage_state = str(self.storage_state_path)
             logger.info(f"加载登录状态: {self.storage_state_path}")
 
-        # 更真实的 User-Agent 和浏览器指纹
+        launch_options = {"headless": headless}
+        if self.browser_channel:
+            launch_options["channel"] = self.browser_channel
+        self.browser = await self._playwright.chromium.launch(**launch_options)
+
         self.context = await self.browser.new_context(
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={'width': 1920, 'height': 1080},
-            locale='ja-JP',
-            timezone_id='Asia/Tokyo',
             storage_state=storage_state,
-            # 添加更多真实浏览器特征
-            extra_http_headers={
-                'Accept-Language': 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            }
+            locale=common_options["locale"],
+            timezone_id=common_options["timezone_id"],
         )
-        
-        # 注入脚本隐藏 webdriver 特征
-        await self.context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => [1, 2, 3, 4, 5]
-            });
-            Object.defineProperty(navigator, 'languages', {
-                get: () => ['ja-JP', 'ja', 'en-US', 'en']
-            });
-        """)
-        
         self.page = await self.context.new_page()
         logger.info(f"浏览器初始化完成 (headless={headless}, use_storage_state={bool(storage_state)})")
 
@@ -136,16 +144,42 @@ class KyudenScraper:
 
     async def is_logged_in(self) -> bool:
         try:
-            await self.page.goto(self.base_url+"/member/account", timeout=10000)
+            await self.page.goto(self.base_url+"/member/account", timeout=30000)
             await self.page.wait_for_load_state('domcontentloaded')
-            await self._random_delay(1, 2)  # 随机等待
-            await self.page.wait_for_selector('button.fs-top_card__detail_button.-hourly, button.fs-top_card__detail_button.-daily',
-                    timeout=2000
-                )
-            return True
+            parsed = urlparse(self.page.url)
+            if parsed.hostname == "id.kyuden.co.jp":
+                return False
+            return parsed.hostname == "my.kyuden.co.jp" and parsed.path.endswith("/member/account")
         except Exception as e:
             logger.warning(f"登录状态检查异常: {e}")
             return False
+
+    async def interactive_login(self, timeout_seconds: int = 900) -> bool:
+        """打开可见 Chrome，等待用户完成登录或验证。"""
+        if not self.profile_dir:
+            raise ValueError("人工登录必须配置 profile_dir")
+
+        await self.init_browser(headless=False, use_storage_state=False)
+        try:
+            await self.page.goto(self.login_url, wait_until="domcontentloaded", timeout=30000)
+            if await self.is_logged_in():
+                logger.info("持久化 profile 已处于登录状态")
+                return True
+
+            await self.page.goto(self.login_url, wait_until="domcontentloaded", timeout=30000)
+            logger.info("请在打开的 Chrome 中完成人工登录；最多等待 %s 秒", timeout_seconds)
+            deadline = asyncio.get_running_loop().time() + timeout_seconds
+            while asyncio.get_running_loop().time() < deadline:
+                parsed = urlparse(self.page.url)
+                if parsed.hostname == "my.kyuden.co.jp" and parsed.path.endswith("/member/account"):
+                    logger.info("人工登录成功，Chrome profile 已自动保存")
+                    return True
+                await asyncio.sleep(2)
+
+            await self._notify_alert("人工登录等待超时", {"stage": "interactive_login"})
+            return False
+        finally:
+            await self.close()
 
     async def login(self, username, password):
         """执行一次显式登录，并在成功后保存 storage state"""
@@ -160,7 +194,9 @@ class KyudenScraper:
             # 模拟鼠标移动
             await self._simulate_mouse_movement()
 
-            email_input = await self.page.query_selector('input[name="body_1$TxtKaiinId"]')
+            email_input = await self.page.query_selector(
+                '#email, input[name="email"], input[name="body_1$TxtKaiinId"]'
+            )
             if not email_input:
                 logger.error("未找到邮箱输入框")
                 await self.page.screenshot(path='email_input_not_found.png')
@@ -175,7 +211,9 @@ class KyudenScraper:
             # 再次模拟鼠标移动
             await self._simulate_mouse_movement()
 
-            password_input = await self.page.query_selector('input[name="body_1$TxtPasswd"]')
+            password_input = await self.page.query_selector(
+                '#password, input[name="password"], input[name="body_1$TxtPasswd"]'
+            )
             if not password_input:
                 logger.error("未找到密码输入框")
                 await self.page.screenshot(path='password_input_not_found.png')
@@ -187,7 +225,13 @@ class KyudenScraper:
             # 登录前随机等待
             await self._random_delay(1, 2)
 
-            submit_button = await self.page.query_selector('button.fs-submit')
+            remember_me = await self.page.query_selector('#remember_me, input[name="remember_me"]')
+            if remember_me and not await remember_me.is_checked():
+                await remember_me.evaluate("element => element.click()")
+
+            submit_button = await self.page.query_selector(
+                '#login_button, button[type="submit"], button.fs-submit'
+            )
             if not submit_button:
                 logger.error("未找到登录提交按钮")
                 await self.page.screenshot(path='submit_button_not_found.png')
@@ -231,12 +275,27 @@ class KyudenScraper:
             await self.page.screenshot(path='login_exception.png')
             return False
 
-    async def ensure_logged_in(self, username: str, password: str) -> bool:
+    async def ensure_logged_in(
+        self,
+        username: Optional[str],
+        password: Optional[str],
+        allow_password_login: bool = True,
+    ) -> bool:
         """先尝试复用 storage state；失败则退回重登，支持最大重试次数"""
         # 1) 尝试复用状态
         if await self.is_logged_in():
             logger.info("检测到已登录（复用状态）")
             return True
+
+        if not allow_password_login:
+            await self._notify_alert(
+                "登录状态已失效，需要人工登录",
+                {"stage": "login", "status": "auth_required"},
+            )
+            raise AuthenticationRequiredError("登录状态已失效，需要人工登录")
+
+        if not username or not password:
+            raise AuthenticationRequiredError("未提供凭据，需要人工登录")
 
         # 2) 回退显式登录 + 重试
         for attempt in range(1, self.max_login_retries + 1):
@@ -244,7 +303,7 @@ class KyudenScraper:
             if await self.login(username, password):
                 return True
 
-            if attempt == 1 and self.storage_state_path:
+            if attempt == 1 and self.storage_state_path and not self.profile_dir:
                 logger.warning("使用 storage state 登录失败，回退到无状态登录并刷新 storage_state.json")
                 try:
                     if self.storage_state_path.exists():
@@ -409,8 +468,15 @@ class KyudenScraper:
         return results
             
     async def close(self):
-        if self.browser:
+        if self._persistent_context and self.context:
+            await self.context.close()
+            self.context = None
+            self.browser = None
+            self._persistent_context = False
+            logger.info("持久化浏览器已关闭")
+        elif self.browser:
             await self.browser.close()
+            self.browser = None
             logger.info("浏览器已关闭")
         if self._playwright:
             await self._playwright.stop()
@@ -426,6 +492,8 @@ class KyudenScraper:
         headless=True,
         hourly_target_date: Optional[Union[str, date]] = None,
         storage_state_path: Optional[Union[str, Path]] = None,
+        profile_dir: Optional[Union[str, Path]] = None,
+        allow_password_login: bool = True,
         max_login_retries: Optional[int] = None,
         alert_handler: Optional[Callable[[str, Dict[str, Any]], Union[None, Awaitable[None]]]] = None,
     ):
@@ -438,6 +506,8 @@ class KyudenScraper:
         # 允许在 scrape 级别覆盖构造参数
         if storage_state_path is not None:
             self.storage_state_path = Path(storage_state_path)
+        if profile_dir is not None:
+            self.profile_dir = Path(profile_dir)
         if max_login_retries is not None:
             self.max_login_retries = max(1, int(max_login_retries))
         if alert_handler is not None:
@@ -455,7 +525,11 @@ class KyudenScraper:
 
         try:
             await self.init_browser(headless=headless, use_storage_state=True)
-            if not await self.ensure_logged_in(username, password):
+            if not await self.ensure_logged_in(
+                username,
+                password,
+                allow_password_login=allow_password_login,
+            ):
                 logger.error("登录失败，终止")
                 return {}
 
@@ -474,6 +548,8 @@ class KyudenScraper:
             if daily_data is not None: result['daily'] = daily_data
             if hourly_data is not None: result['hourly'] = hourly_data
             return result
+        except AuthenticationRequiredError:
+            raise
         except Exception as e:
             await self._notify_alert("爬取过程中发生未捕获错误", {"exception": str(e)})
             logger.error(f"爬取过程中发生错误: {e}")

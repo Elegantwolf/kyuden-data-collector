@@ -1,5 +1,7 @@
 #sensitve information
 config.py
+secret/*.env
+secrets/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -235,4 +237,6 @@ kyuden_usage.db-shm
 *.db-shm
 .ms-playwright
 state/
+run/
+logs/
 .storage_state.json

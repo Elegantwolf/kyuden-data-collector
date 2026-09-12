@@ -5,11 +5,12 @@ After=default.target
 [Service]
 Type=simple
 WorkingDirectory=%h/kyuden-data-collector
-EnvironmentFile=%h/kyuden-data-collector/secrets/kyuden.env
-Environment=KYUDEN_STATE=%h/kyuden-data-collector/state/storage_state.json
-ExecStart=/usr/bin/flock -n %h/kyuden-data-collector/run/daily.lock \
-  %h/kyuden-data-collector/.venv/bin/python %h/kyuden-data-collector/collector.py \
+EnvironmentFile=-%h/kyuden-data-collector/secrets/kyuden.env
+Environment=KYUDEN_PROFILE_DIR=%h/kyuden-data-collector/state/chrome-profile
+Environment=KYUDEN_LOCK=%h/kyuden-data-collector/run/collector.lock
+ExecStart=%h/kyuden-data-collector/.venv/bin/python %h/kyuden-data-collector/collector.py \
   -m daily --db %h/kyuden-data-collector/data/kyuden.sqlite
 Restart=on-failure
+RestartPreventExitStatus=20
 RestartSec=10s
 RuntimeMaxSec=300

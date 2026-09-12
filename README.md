@@ -12,10 +12,11 @@ Developed as part of my personal exploration in automation and data handling.
 
 ## Features
 
-- Automated login and data extraction from Kyuden
+- Human-assisted login and automated data extraction from Kyuden
 - Supports daily and hourly data collection
 - Saves data in SQLite, CSV, or JSON formats
-- Persistent login session via storage state
+- Persistent login session via a dedicated Google Chrome profile
+- Optional JSON webhook notification when authentication is required
 - Configurable via environment variables and CLI
 - Automated scheduling via systemd (Linux) or LaunchAgent (macOS)
 
@@ -26,9 +27,8 @@ Developed as part of my personal exploration in automation and data handling.
 ```bash
 cd ~
 git clone https://github.com/Elegantwolf/kyuden-data-collector.git
-mkdir -p ~/kyuden-data-collector/{data,run,state,secrets,systemd,LaunchAgent,logs}
+mkdir -p ~/kyuden-data-collector/{data,run,state,secrets,logs}
 chmod 700 ~/kyuden-data-collector/secrets
-chmod 600 ~/kyuden-data-collector/secrets/kyuden.env
 ```
 
 ### 2. Create Virtual Environment and Install Dependencies
@@ -40,28 +40,44 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-#### Playwright Browser Installation (Custom Cache Location)
+The collector uses the locally installed Google Chrome by default. Set
+`KYUDEN_BROWSER_CHANNEL=` to use Playwright Chromium instead.
 
-By default, Playwright installs browser binaries in `~/Library/Caches/ms-playwright` (macOS) or `~/.cache/ms-playwright` (Linux).  
-To keep all project data in one place, set a custom cache directory:
+### 3. Authenticate Once in a Dedicated Chrome Profile
+
+Do not put the Kyuden username or password in this repository. Start the
+interactive login helper and complete login (including any verification) in
+the Chrome window:
 
 ```bash
-mkdir -p ~/kyuden-data-collector/ms-playwright
-export PLAYWRIGHT_BROWSERS_PATH="$HOME/kyuden-data-collector/ms-playwright"
-playwright install chromium
+./manual_login.command
+# or
+.venv/bin/python collector.py --interactive-login
 ```
 
-> This ensures all Playwright browser files are stored inside your project folder for easier data management.
+The dedicated profile is stored in `state/chrome-profile/`, which is ignored
+by Git. Scheduled collection never submits a password. When the session
+expires, it exits with status 20 and asks for another interactive login.
 
-### 3. Configure Credentials
+### 4. Optional Notification Webhook
 
-Edit `~/kyuden-data-collector/secrets/kyuden.env`:
+Set a webhook URL if another service should receive a JSON POST when login is
+required or collection fails:
 
+```bash
+mkdir -p secrets
+printf 'KYUDEN_NOTIFY_WEBHOOK=https://example.invalid/your-webhook\n' > secrets/kyuden.env
+chmod 600 secrets/kyuden.env
 ```
-KYUDEN_USER=your_username
-KYUDEN_PASS=your_password
-KYUDEN_MAX_LOGIN_RETRIES=2
+
+The payload shape is:
+
+```json
+{"message": "登录状态已失效，需要人工登录", "context": {"status": "auth_required"}}
 ```
+
+Keep `secrets/kyuden.env` local; the entire `secrets/` directory is ignored by
+Git.
 
 ## Linux: Automated Scheduling with systemd
 
