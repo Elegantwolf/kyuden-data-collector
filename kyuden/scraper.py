@@ -31,6 +31,7 @@ class KyudenScraper:
     ):
         self.base_url = "https://my.kyuden.co.jp"
         self.login_url = f"{self.base_url}/member"  # 登录页面更精确
+        self.account_url = f"{self.base_url}/ja-JP/member/account"
         self.chart_url = f"{self.base_url}/member/chart_days_current"
         self.browser = None
         self.context = None
@@ -146,7 +147,7 @@ class KyudenScraper:
     async def is_logged_in(self) -> bool:
         try:
             await self.page.goto(
-                self.base_url + "/member/account",
+                self.account_url,
                 wait_until="domcontentloaded",
                 timeout=30000,
             )
@@ -333,7 +334,7 @@ class KyudenScraper:
     async def get_daily_usage_data(self):
         """获取每日用电量数据"""
         await self._random_delay(1, 2)  # 随机等待
-        await self.page.goto(self.base_url+"/member/account", timeout=10000)
+        await self.page.goto(self.account_url, timeout=10000)
         await self._random_delay(1, 2)  # 模拟用户查看页面
         await self.page.click('button.fs-top_card__detail_button.-daily')
         await self.page.wait_for_load_state('domcontentloaded')
@@ -357,7 +358,7 @@ class KyudenScraper:
         """获取每小时用电量数据（允许传入目标日期归属）"""
         await self.page.wait_for_load_state('networkidle')
         await self._random_delay(1, 2)  # 随机等待
-        await self.page.goto(self.base_url+"/member/account", timeout=10000)
+        await self.page.goto(self.account_url, timeout=10000)
         await self._random_delay(1, 2)  # 模拟用户查看页面
         await self.page.click('button.fs-top_card__detail_button.-hourly')
         await self.page.wait_for_load_state('domcontentloaded')
