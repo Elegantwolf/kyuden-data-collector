@@ -7,8 +7,8 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
-    <string>-c</string>
-    <string>mkdir -p "$HOME/kyuden-data-collector/logs" "$HOME/kyuden-data-collector/data" "$HOME/kyuden-data-collector/state" "$HOME/kyuden-data-collector/run" &amp;&amp; export KYUDEN_PROFILE_DIR="$HOME/kyuden-data-collector/state/chrome-profile" KYUDEN_LOCK="$HOME/kyuden-data-collector/run/collector.lock" TZ=Asia/Tokyo &amp;&amp; if [[ -f "$HOME/kyuden-data-collector/secrets/kyuden.env" ]]; then set -a; source "$HOME/kyuden-data-collector/secrets/kyuden.env"; set +a; fi &amp;&amp; exec "$HOME/kyuden-data-collector/.venv/bin/python" "$HOME/kyuden-data-collector/collector.py" -m daily --db "$HOME/kyuden-data-collector/data/kyuden.sqlite" &gt;&gt; "$HOME/kyuden-data-collector/logs/kyuden-daily.log" 2&gt;&amp;1</string>
+    <string>-lc</string>
+    <string>exec "$HOME/kyuden-data-collector/scripts/run_macos_collector.zsh" daily</string>
   </array>
 
   <key>EnvironmentVariables</key>

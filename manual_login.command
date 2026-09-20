@@ -11,13 +11,13 @@ if [[ ! -x .venv/bin/python ]]; then
 fi
 
 .venv/bin/python collector.py --interactive-login --auth-timeout 900
-status=$?
+login_status=$?
 
-if [[ $status -eq 0 ]]; then
+if [[ $login_status -eq 0 ]]; then
   echo "人工登录完成，持久化 Chrome profile 已保存。"
 else
-  echo "人工登录未完成（退出码：$status）。"
+  echo "人工登录未完成（退出码：$login_status）。"
 fi
 
 read -r "?按回车键关闭..."
-exit $status
+exit $login_status

@@ -1,154 +1,84 @@
-# Kyuden Data Collector
+# 九州电力个人数据采集器
 
-A Python-based tool for automatically collecting daily electricity usage data from the Kyuden website.  
-Powered by Playwright and SQLite.
-Developed as part of my personal exploration in automation and data handling.
+面向个人、单账户、本地运行的电力数据采集工具。核心采集链路已经实现；当前工作重心是可靠运行和维护，而不是重新开发爬虫。
 
-## Requirements
+## 项目目标
 
-- Python 3.11+
-- SQLite
-- Playwright
+定期复用专用 Chrome 登录会话，采集当前账期每日用电量和当前小时图表，幂等写入本地 SQLite。登录过期或出现验证时暂停采集，通知用户人工续期，再恢复后续任务。
 
-## Features
+允许人工参与：目标是平均每周不超过一次登录干预，但这需要实际运行观察，不能承诺网站会话有效期，也不以绕过验证码为目标。详见 [目标与验收](docs/PROJECT_GOALS.md)。
 
-- Human-assisted login and automated data extraction from Kyuden
-- Supports daily and hourly data collection
-- Saves data in SQLite, CSV, or JSON formats
-- Persistent login session via a dedicated Google Chrome profile
-- Optional JSON webhook notification when authentication is required
-- Configurable via environment variables and CLI
-- Automated scheduling via systemd (Linux) or LaunchAgent (macOS)
+## 已有能力与边界
 
-## Quick Setup
+- 专用持久化 Chrome profile；定时任务默认不使用账号密码登录。
+- 人工登录命令及 macOS 双击入口 `manual_login.command`。
+- 每日／每小时采集、SQLite UPSERT、CSV／JSON 导出接口。
+- 进程锁、登录失效退出码、可配置 webhook 通知。
+- 当前周期日期解析、JST 时间、空值跳过和异常数据检查。
 
-### 1. Clone the Project, Prepare Directories and Permissions
+已有端到端采集验证不等于长期可靠性验证。通知需要配置接收端；计划任务模板需要用户安装。小时采集没有历史页面导航，`--hourly-date` 只接受日本时区当天，不能用于历史回填。每日解析限定当前账期（非空读数最多追溯 62 天）。小时图表日期目前依赖当天假设，仍需与网页日期核对，尤其是跨午夜采集。
 
-```bash
-cd ~
-git clone https://github.com/Elegantwolf/kyuden-data-collector.git
-mkdir -p ~/kyuden-data-collector/{data,run,state,secrets,logs}
-chmod 700 ~/kyuden-data-collector/secrets
-```
+## 安装与使用
 
-### 2. Create Virtual Environment and Install Dependencies
+需要 Python 3.10+、本机 Google Chrome（macOS/Linux；进程锁使用 fcntl）。
 
-```bash
-cd ~/kyuden-data-collector
+```sh
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m kyuden --interactive-login
+.venv/bin/python -m kyuden --mode both
 ```
 
-The collector uses the locally installed Google Chrome by default. Set
-`KYUDEN_BROWSER_CHANNEL=` to use Playwright Chromium instead.
+默认数据库：`data/kyuden.sqlite`；默认会话：`state/chrome-profile`。默认路径相对项目根目录，不受启动目录影响。已有数据库应使用 `--db /绝对路径/原数据库`，不会自动迁移或合并旧数据库。
 
-### 3. Authenticate Once in a Dedicated Chrome Profile
-
-Do not put the Kyuden username or password in this repository. Start the
-interactive login helper and complete login (including any verification) in
-the Chrome window:
-
-```bash
-./manual_login.command
-# or
-.venv/bin/python collector.py --interactive-login
+```sh
+.venv/bin/python -m kyuden --mode daily --db /absolute/path/usage.sqlite
+.venv/bin/python -m kyuden --mode hourly --headed
+.venv/bin/python -m unittest discover -v
 ```
 
-The dedicated profile is stored in `state/chrome-profile/`, which is ignored
-by Git. Scheduled collection never submits a password. When the session
-expires, it exits with status 20 and asks for another interactive login.
+旧入口 `python collector.py` 和 `python kyuden_scraper.py` 委托给同一个 CLI；原有类导入仍然可用。旧抓取器命令行参数不保证兼容，以 `--help` 为准。
 
-### 4. Optional Notification Webhook
+### macOS 长期运行
 
-Set a webhook URL if another service should receive a JSON POST when login is
-required or collection fails:
+安装脚本会先卸载同名旧任务，再原位更新链接，因此重复执行不会创建第二套任务：
 
-```bash
-mkdir -p secrets
-printf 'KYUDEN_NOTIFY_WEBHOOK=https://example.invalid/your-webhook\n' > secrets/kyuden.env
-chmod 600 secrets/kyuden.env
+```sh
+./scripts/install_macos_launchagents.zsh
+launchctl print "gui/$(id -u)/com.kyuden.collector.hourly"
 ```
 
-The payload shape is:
+小时任务在每小时第 5 分钟运行；每日任务在 01:05 运行。单个日志超过 5 MiB 时保留一份 `.1`，避免无限增长。部署前如需清空旧数据，应先将 `data/` 与 `logs/` 移到仓库外的私有归档；安装脚本不会自行删除用户数据。
 
-```json
-{"message": "登录状态已失效，需要人工登录", "context": {"status": "auth_required"}}
-```
+## 登录失效与通知
 
-Keep `secrets/kyuden.env` local; the entire `secrets/` directory is ignored by
-Git.
+退出码：0 为流程成功（不保证当天数据完整），20 为需要人工登录，1 为其他失败。
+收到登录提示后，运行人工登录命令或双击 `manual_login.command`，完成网站验证；后续采集复用相同 profile。人工窗口和采集共用锁，避免并发损坏会话。
 
-## Linux: Automated Scheduling with systemd
+可选环境变量：
 
-```bash
-systemctl --user daemon-reload
-systemctl --user link ~/kyuden-data-collector/systemd/kyuden-hourly.service
-systemctl --user link ~/kyuden-data-collector/systemd/kyuden-hourly.timer
-systemctl --user link ~/kyuden-data-collector/systemd/kyuden-daily.service
-systemctl --user link ~/kyuden-data-collector/systemd/kyuden-daily.timer
-systemctl --user enable --now kyuden-hourly.timer kyuden-daily.timer
-```
+| 变量 | 用途 |
+| --- | --- |
+| KYUDEN_PROFILE_DIR | 专用 Chrome profile 路径 |
+| KYUDEN_BROWSER_CHANNEL | 默认 chrome |
+| KYUDEN_HEADLESS | 默认 true；设 false 显示窗口 |
+| KYUDEN_AUTH_TIMEOUT | 人工登录等待秒数，默认 900 |
+| KYUDEN_LOCK / KYUDEN_LOCK_TIMEOUT | 锁路径／等待秒数，默认 180 |
+| KYUDEN_NOTIFY_WEBHOOK | 接收 JSON POST 的通知地址 |
 
-**Manual trigger and logs:**
+profile、环境文件、数据库、截图和采集结果都是敏感本地数据，不应提交 Git。不要复用日常 Chrome profile，不需要在代码中保存密码。webhook 地址也可能含密钥。日志／告警可能带运行上下文，只应发送给可信接收端。
 
-```bash
-systemctl --user start kyuden-hourly.service
-journalctl --user -u kyuden-hourly.service -n 200 -f
-```
+## 代码结构
 
-**Optional: Run on boot without login**
+| 模块 | 职责 |
+| --- | --- |
+| kyuden/cli.py | 参数、锁、退出码 |
+| kyuden/service.py | 采集与入库编排 |
+| kyuden/scraper.py | 浏览器、会话、网页读取 |
+| kyuden/parsing.py | 纯数据解析与校验 |
+| kyuden/storage.py | SQLite schema 与 UPSERT |
+| kyuden/export.py | CSV／JSON 导出 |
+| kyuden/notifications.py、locking.py、settings.py | 运行支持 |
+| legacy/ | 早期实验版本，仅供参考，不属于支持入口 |
 
-```bash
-loginctl enable-linger "$USER"
-```
-
-## macOS: Automated Scheduling with LaunchAgent
-
-1. **Link LaunchAgent files:**
-
-   ```bash
-   ln -sf ~/kyuden-data-collector/LaunchAgent/com.kyuden.collector.hourly.plist ~/Library/LaunchAgents/
-   ln -sf ~/kyuden-data-collector/LaunchAgent/com.kyuden.collector.daily.plist ~/Library/LaunchAgents/
-   launchctl load -w ~/Library/LaunchAgents/com.kyuden.collector.hourly.plist
-   launchctl load -w ~/Library/LaunchAgents/com.kyuden.collector.daily.plist
-   ```
-
-2. **Manual trigger and logs:**
-
-   ```bash
-   launchctl start com.kyuden.collector.hourly
-   tail -f ~/kyuden-data-collector/logs/kyuden-hourly.log
-   ```
-
-> All data, logs, and state files are stored in `~/kyuden-data-collector` for easy management and backup.
-
-## Data Format
-
-Each record includes:
-
-- `date`: Date (YYYY-MM-DD)
-- `date_str`: Original date string (e.g. "8/20")
-- `usage_kwh`: Usage in kWh
-- `timestamp`: Data retrieval time
-
-## Security & Notice
-
-- Only use with your own Kyuden account and data.
-- Keep credentials safe; never commit secrets to version control.
-- Respect Kyuden’s terms of service and avoid excessive scraping.
-
-## Future Plans
-
-- Data visualization
-- Web data acquisition
-- Home Assistant integration
-- Email Alarm
-
-## Contributing
-
-Pull requests and issues are welcome!
-
-## License
-
-MIT License. See [LICENSE](LICENSE) for details.
+数据库表结构保持兼容；本轮没有删除历史数据或浏览器会话。测试均为离线测试，不会打开浏览器或提交凭据。

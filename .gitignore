@@ -237,6 +237,10 @@ kyuden_usage.db-shm
 *.db-shm
 .ms-playwright
 state/
+data/
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
 run/
 logs/
 .storage_state.json
