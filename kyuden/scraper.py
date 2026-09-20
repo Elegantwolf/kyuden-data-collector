@@ -30,7 +30,10 @@ class KyudenScraper:
         max_login_retries: int = 2,
     ):
         self.base_url = "https://my.kyuden.co.jp"
-        self.login_url = f"{self.base_url}/member"  # 登录页面更精确
+        # Official login link exposed by the public homepage. The sKbn value
+        # initializes the server-side login transaction; /member alone lands
+        # on /ja-JP/error and must not be used as an entry point.
+        self.login_url = f"{self.base_url}/member/?sKbn=0"
         self.account_url = f"{self.base_url}/ja-JP/member/account"
         self.chart_url = f"{self.base_url}/member/chart_days_current"
         self.browser = None
@@ -147,7 +150,7 @@ class KyudenScraper:
     async def is_logged_in(self) -> bool:
         try:
             await self.page.goto(
-                self.account_url,
+                self.login_url,
                 wait_until="domcontentloaded",
                 timeout=30000,
             )

@@ -22,6 +22,13 @@ class FakePage:
 
 
 class AuthenticationStateTests(unittest.IsolatedAsyncioTestCase):
+    def test_uses_official_login_entrypoint(self):
+        scraper = KyudenScraper(browser_channel=None)
+        self.assertEqual(
+            scraper.login_url,
+            "https://my.kyuden.co.jp/member/?sKbn=0",
+        )
+
     async def test_localized_account_url_is_logged_in(self):
         scraper = KyudenScraper(browser_channel=None)
         scraper.page = FakePage("https://my.kyuden.co.jp/ja-JP/member/account")
@@ -31,6 +38,12 @@ class AuthenticationStateTests(unittest.IsolatedAsyncioTestCase):
     async def test_identity_provider_url_is_logged_out(self):
         scraper = KyudenScraper(browser_channel=None)
         scraper.page = FakePage("https://id.kyuden.co.jp/login")
+
+        self.assertFalse(await scraper.is_logged_in())
+
+    async def test_error_page_is_logged_out(self):
+        scraper = KyudenScraper(browser_channel=None)
+        scraper.page = FakePage("https://my.kyuden.co.jp/ja-JP/error")
 
         self.assertFalse(await scraper.is_logged_in())
 
