@@ -17,6 +17,9 @@ class FakePage:
     async def wait_for_load_state(self, *_args, **_kwargs):
         return None
 
+    async def wait_for_timeout(self, *_args, **_kwargs):
+        return None
+
 
 class AuthenticationStateTests(unittest.IsolatedAsyncioTestCase):
     async def test_localized_account_url_is_logged_in(self):

@@ -145,9 +145,17 @@ class KyudenScraper:
 
     async def is_logged_in(self) -> bool:
         try:
-            await self.page.goto(self.base_url+"/member/account", timeout=30000)
-            await self.page.wait_for_load_state('domcontentloaded')
+            await self.page.goto(
+                self.base_url + "/member/account",
+                wait_until="domcontentloaded",
+                timeout=30000,
+            )
+            # The account URL is briefly visible before the site's client-side
+            # authentication redirect. Checking it immediately creates a false
+            # positive and closes the manual-login window before login begins.
+            await self.page.wait_for_timeout(2500)
             parsed = urlparse(self.page.url)
+            logger.info("登录状态检查落点: %s%s", parsed.hostname, parsed.path)
             if parsed.hostname == "id.kyuden.co.jp":
                 return False
             return parsed.hostname == "my.kyuden.co.jp" and parsed.path.endswith("/member/account")
@@ -173,8 +181,9 @@ class KyudenScraper:
             while asyncio.get_running_loop().time() < deadline:
                 parsed = urlparse(self.page.url)
                 if parsed.hostname == "my.kyuden.co.jp" and parsed.path.endswith("/member/account"):
-                    logger.info("人工登录成功，Chrome profile 已自动保存")
-                    return True
+                    if await self.is_logged_in():
+                        logger.info("人工登录成功，Chrome profile 已自动保存")
+                        return True
                 await asyncio.sleep(2)
 
             await self._notify_alert("人工登录等待超时", {"stage": "interactive_login"})
