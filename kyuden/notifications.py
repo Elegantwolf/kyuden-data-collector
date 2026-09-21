@@ -6,6 +6,18 @@ from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
 
+
+def combine_alert_handlers(*handlers):
+    enabled = [handler for handler in handlers if handler]
+    if not enabled:
+        return None
+
+    async def send_alert(message: str, context: dict):
+        for handler in enabled:
+            await handler(message, context)
+
+    return send_alert
+
 def build_alert_handler(webhook_url: str | None):
     """Build a generic JSON webhook callback; no-op when no URL is configured."""
     if not webhook_url:

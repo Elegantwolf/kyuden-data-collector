@@ -14,6 +14,7 @@ async def run_collect(
     profile_dir: str,
     headless: bool,
     alert_handler=None,
+    ha_reporter=None,
 ):
     scraper = KyudenScraper(
         profile_dir=profile_dir,
@@ -45,6 +46,13 @@ async def run_collect(
         n1 = db.upsert_daily(daily_rows) if daily_rows else 0
         n2 = db.upsert_hourly(hourly_rows) if hourly_rows else 0
         logger.info(f"upsert daily={n1}, hourly={n2}")
+
+    if ha_reporter:
+        await ha_reporter.publish_success(
+            db_path,
+            mode,
+            {"daily": len(daily_rows), "hourly": len(hourly_rows)},
+        )
 
 
 async def run_interactive_login(

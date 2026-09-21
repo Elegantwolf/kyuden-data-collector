@@ -6,7 +6,8 @@ import sys
 from pathlib import Path
 from .settings import DEFAULT_DB_PATH, DEFAULT_PROFILE_DIR, DEFAULT_LOCK_PATH
 from .locking import collector_lock
-from .notifications import build_alert_handler
+from .ha import HomeAssistantReporter, MQTTConfig
+from .notifications import build_alert_handler, combine_alert_handlers
 from .scraper import AuthenticationRequiredError
 from .service import run_collect, run_interactive_login
 
@@ -53,7 +54,12 @@ def main():
     profile_dir = str(Path(args.profile_dir).expanduser().resolve())
     lock_path = Path(os.getenv("KYUDEN_LOCK", str(DEFAULT_LOCK_PATH))).expanduser().resolve()
     lock_timeout = float(os.getenv("KYUDEN_LOCK_TIMEOUT", "180"))
-    alert_handler = build_alert_handler(os.getenv("KYUDEN_NOTIFY_WEBHOOK"))
+    mqtt_config = MQTTConfig.from_env()
+    ha_reporter = HomeAssistantReporter(mqtt_config) if mqtt_config else None
+    alert_handler = combine_alert_handlers(
+        build_alert_handler(os.getenv("KYUDEN_NOTIFY_WEBHOOK")),
+        ha_reporter.send_alert if ha_reporter else None,
+    )
 
     try:
         with collector_lock(lock_path, timeout_seconds=lock_timeout):
@@ -71,6 +77,7 @@ def main():
                     profile_dir,
                     headless=not args.headed and _env_bool("KYUDEN_HEADLESS", True),
                     alert_handler=alert_handler,
+                    ha_reporter=ha_reporter,
                 )
             )
             return 0

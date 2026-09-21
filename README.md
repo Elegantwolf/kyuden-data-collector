@@ -14,6 +14,7 @@
 - 人工登录命令及 macOS 双击入口 `manual_login.command`。
 - 每日／每小时采集、SQLite UPSERT、CSV／JSON 导出接口。
 - 进程锁、登录失效退出码、可配置 webhook 通知。
+- 可选 Home Assistant MQTT Discovery、Energy Dashboard 与健康状态实体。
 - 当前周期日期解析、JST 时间、空值跳过和异常数据检查。
 
 已有端到端采集验证不等于长期可靠性验证。通知需要配置接收端；计划任务模板需要用户安装。小时采集没有历史页面导航，`--hourly-date` 只接受日本时区当天，不能用于历史回填。每日解析限定当前账期（非空读数最多追溯 62 天）。小时图表日期目前依赖当天假设，仍需与网页日期核对，尤其是跨午夜采集。
@@ -65,6 +66,11 @@ launchctl print "gui/$(id -u)/com.kyuden.collector.hourly"
 | KYUDEN_AUTH_TIMEOUT | 人工登录等待秒数，默认 900 |
 | KYUDEN_LOCK / KYUDEN_LOCK_TIMEOUT | 锁路径／等待秒数，默认 180 |
 | KYUDEN_NOTIFY_WEBHOOK | 接收 JSON POST 的通知地址 |
+| KYUDEN_MQTT_HOST / KYUDEN_MQTT_PORT | 本地 MQTT broker；未配置 host 时禁用 HA 输出 |
+| KYUDEN_MQTT_USERNAME / KYUDEN_MQTT_PASSWORD | MQTT 凭据，只放在本地 secrets 文件 |
+| KYUDEN_MQTT_TLS | 是否启用 MQTT TLS，默认 false |
+
+Home Assistant 配置和告警接口见 [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md)。
 
 profile、环境文件、数据库、截图和采集结果都是敏感本地数据，不应提交 Git。不要复用日常 Chrome profile，不需要在代码中保存密码。webhook 地址也可能含密钥。日志／告警可能带运行上下文，只应发送给可信接收端。
 
