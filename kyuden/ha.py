@@ -119,6 +119,19 @@ class HomeAssistantReporter:
                 "unit_of_measurement": "kWh",
                 "device": device,
             },
+            # matterbridge-hass currently accepts energy sensors with the
+            # measurement state class.  Keep this compatibility entity
+            # separate from the HA Energy Dashboard total sensor above.
+            "matter_total_energy": {
+                "name": "Matter Cumulative Energy",
+                "state_topic": self._topic("energy/total_kwh"),
+                "unique_id": "kyuden_matter_total_energy",
+                "device_class": "energy",
+                "state_class": "measurement",
+                "unit_of_measurement": "kWh",
+                "icon": "mdi:meter-electric-outline",
+                "device": device,
+            },
             "last_collected": {
                 "name": "Last Collected",
                 "state_topic": self._topic("health/last_collected"),

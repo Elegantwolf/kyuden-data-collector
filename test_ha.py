@@ -42,6 +42,16 @@ class MQTTReporterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"state_class": "total"', total)
         self.assertIn('"state_class": "total_increasing"', today)
 
+    def test_discovery_exposes_matterbridge_compatible_energy_sensor(self):
+        messages = dict(self.reporter.discovery_messages())
+        matter = messages[
+            "homeassistant/sensor/kyuden/matter_total_energy/config"
+        ]
+        self.assertIn('"device_class": "energy"', matter)
+        self.assertIn('"state_class": "measurement"', matter)
+        self.assertIn('"unit_of_measurement": "kWh"', matter)
+        self.assertIn('"state_topic": "kyuden/energy/total_kwh"', matter)
+
     async def test_auth_alert_has_dedicated_state(self):
         published = []
         self.reporter._publish = lambda messages: published.extend(messages)

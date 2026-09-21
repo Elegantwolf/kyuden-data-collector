@@ -1,6 +1,6 @@
 # Home Assistant 本地接入
 
-采集器通过 MQTT Discovery 提供四个实体：今日用电、累计用电、最后成功采集时间和采集器状态。未配置 MQTT 时功能完全关闭，不影响采集和 SQLite。
+采集器通过 MQTT Discovery 提供今日用电、累计用电、Matter 兼容累计用电、最后成功采集时间和采集器状态。未配置 MQTT 时功能完全关闭，不影响采集和 SQLite。
 
 ## MQTT 配置
 
@@ -17,6 +17,17 @@ KYUDEN_MQTT_PASSWORD=replace_me
 下一次成功采集会发布 retained discovery 和状态。HA 中应出现 `Kyuden Data Collector` 设备。把其中的 `Total Energy`（单位 kWh，energy，state class total）添加到 Settings > Dashboards > Energy 的电网用电来源。
 
 累计值采用“已完成日期的 daily 数据 + 当天 hourly 数据”，避免同一天重复计算。它从本地数据库现有数据起算，不等同于电表终身读数；清空数据库会使 HA 看到一次基线变化。
+
+## Matterbridge / Apple Home
+
+`Matter Cumulative Energy` 与 `Total Energy` 使用相同的累计 kWh 状态，但按
+`matterbridge-hass` 当前要求声明为 `state_class: measurement`。它只用于
+Matterbridge，不要把它加入 HA Energy Dashboard；Energy Dashboard 继续使用
+`Total Energy`。
+
+在 Matterbridge 中使用 Label 或白名单仅暴露 `Matter Cumulative Energy`，避免
+与原有 HomeKit Bridge 产生重复设备。该兼容实体没有伪造即时功率：九州电力页面
+提供的是分时电量，不是实时 W、V 或 A。
 
 ## 登录失效和采集失败
 
