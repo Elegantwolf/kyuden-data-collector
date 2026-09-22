@@ -52,6 +52,23 @@ class MQTTReporterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"unit_of_measurement": "kWh"', matter)
         self.assertIn('"state_topic": "kyuden/energy/total_kwh"', matter)
 
+    def test_discovery_exposes_read_only_matter_outlet_carrier(self):
+        messages = dict(self.reporter.discovery_messages())
+        outlet = messages["homeassistant/switch/kyuden/matter_outlet/config"]
+        self.assertIn('"state_topic": "kyuden/matter/outlet/state"', outlet)
+        self.assertIn('"command_topic": "kyuden/matter/outlet/set"', outlet)
+        self.assertIn('"unique_id": "kyuden_matter_outlet"', outlet)
+
+    async def test_success_keeps_matter_outlet_on(self):
+        published = []
+        self.reporter._publish = lambda messages: published.extend(messages)
+        with patch("kyuden.ha.read_energy_snapshot") as snapshot:
+            snapshot.return_value.today_kwh = 1.2
+            snapshot.return_value.total_kwh = 12.3
+            snapshot.return_value.last_collected_at = "2026-09-22T15:00:00+09:00"
+            await self.reporter.publish_success("ignored.sqlite", "hourly", {})
+        self.assertIn(("kyuden/matter/outlet/state", "ON"), published)
+
     async def test_mqtt_publish_retries_transient_failure(self):
         attempts = []
 

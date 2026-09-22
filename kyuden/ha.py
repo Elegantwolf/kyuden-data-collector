@@ -132,6 +132,23 @@ class HomeAssistantReporter:
                 "icon": "mdi:meter-electric-outline",
                 "device": device,
             },
+            # Apple Home currently does not render a bridged standalone
+            # electricalSensor.  A harmless, always-on MQTT switch gives the
+            # same HA device a Matter plug-in-unit endpoint; Matterbridge can
+            # then attach the real Electrical Energy Measurement endpoint to
+            # a device Apple Home actually displays.  Commands are purposely
+            # ignored: this is a meter, not a physical disconnect switch.
+            "matter_outlet": {
+                "_component": "switch",
+                "name": "Power Meter",
+                "state_topic": self._topic("matter/outlet/state"),
+                "command_topic": self._topic("matter/outlet/set"),
+                "unique_id": "kyuden_matter_outlet",
+                "payload_on": "ON",
+                "payload_off": "OFF",
+                "icon": "mdi:transmission-tower",
+                "device": device,
+            },
             "last_collected": {
                 "name": "Last Collected",
                 "state_topic": self._topic("health/last_collected"),
@@ -148,13 +165,17 @@ class HomeAssistantReporter:
                 "device": device,
             },
         }
-        return [
-            (
-                f"{self.config.discovery_prefix}/sensor/kyuden/{key}/config",
-                json.dumps(value, ensure_ascii=False),
+        messages = []
+        for key, value in definitions.items():
+            payload = dict(value)
+            component = payload.pop("_component", "sensor")
+            messages.append(
+                (
+                    f"{self.config.discovery_prefix}/{component}/kyuden/{key}/config",
+                    json.dumps(payload, ensure_ascii=False),
+                )
             )
-            for key, value in definitions.items()
-        ]
+        return messages
 
     def _publish(self, messages):
         import paho.mqtt.client as mqtt
@@ -208,6 +229,7 @@ class HomeAssistantReporter:
             messages = self.discovery_messages() + [
                 (self._topic("energy/today_kwh"), str(snapshot.today_kwh)),
                 (self._topic("energy/total_kwh"), str(snapshot.total_kwh)),
+                (self._topic("matter/outlet/state"), "ON"),
                 (self._topic("health/last_collected"), snapshot.last_collected_at),
                 (self._topic("health/status"), "ok"),
                 (self._topic("health/details"), json.dumps(details)),

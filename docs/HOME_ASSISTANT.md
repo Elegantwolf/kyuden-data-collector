@@ -14,7 +14,7 @@ KYUDEN_MQTT_PASSWORD=replace_me
 # KYUDEN_MQTT_TLS=true
 ```
 
-下一次成功采集会发布 retained discovery 和状态。HA 中应出现 `Kyuden Data Collector` 设备。把其中的 `Total Energy`（单位 kWh，energy，state class total）添加到 Settings > Dashboards > Energy 的电网用电来源。
+下一次成功采集会发布 retained discovery 和状态。HA 中应出现 `Kyuden Data Collector` 设备。把其中的 `Today Energy`（单位 kWh，energy，state class total_increasing）添加到 Settings > Dashboards > Energy 的电网用电来源。该实体每天归零，避免次日修订前一天结算值时把修订量错误记到当天。
 
 累计值采用“已完成日期的 daily 数据 + 当天 hourly 数据”，避免同一天重复计算。它从本地数据库现有数据起算，不等同于电表终身读数；清空数据库会使 HA 看到一次基线变化。
 
@@ -22,12 +22,15 @@ KYUDEN_MQTT_PASSWORD=replace_me
 
 `Matter Cumulative Energy` 与 `Total Energy` 使用相同的累计 kWh 状态，但按
 当前部署的 `matterbridge-hass` 要求声明为 `state_class: total_increasing`。它只用于
-Matterbridge，不要把它加入 HA Energy Dashboard；Energy Dashboard 继续使用
-`Total Energy`。
+Matterbridge，不要把它加入 HA Energy Dashboard；Energy Dashboard 使用每天归零的
+`Today Energy`。
 
-在 Matterbridge 中使用 Label 或白名单仅暴露 `Matter Cumulative Energy`，避免
-与原有 HomeKit Bridge 产生重复设备。该兼容实体没有伪造即时功率：九州电力页面
-提供的是分时电量，不是实时 W、V 或 A。
+Apple Home 不显示桥接后的独立 `electricalSensor`，因此采集器还提供一个始终为 ON
+的 `Power Meter` MQTT switch，作为 Matter plug-in-unit 的可见外壳。Matterbridge 中
+保留 `Matter Cumulative Energy` 和 `Power Meter`，继续排除其他 Kyuden 实体。开关
+命令不会控制采集器，也不会切断任何物理设备；下次成功发布时状态会恢复为 ON。
+
+该兼容设备没有伪造即时功率：九州电力页面提供的是分时电量，不是实时 W、V 或 A。
 
 ## 登录失效和采集失败
 
