@@ -119,15 +119,15 @@ class HomeAssistantReporter:
                 "unit_of_measurement": "kWh",
                 "device": device,
             },
-            # matterbridge-hass currently accepts energy sensors with the
-            # measurement state class.  Keep this compatibility entity
+            # matterbridge-hass accepts the cumulative energy endpoint with
+            # the total_increasing state class. Keep this compatibility entity
             # separate from the HA Energy Dashboard total sensor above.
             "matter_total_energy": {
                 "name": "Matter Cumulative Energy",
                 "state_topic": self._topic("energy/total_kwh"),
                 "unique_id": "kyuden_matter_total_energy",
                 "device_class": "energy",
-                "state_class": "measurement",
+                "state_class": "total_increasing",
                 "unit_of_measurement": "kWh",
                 "icon": "mdi:meter-electric-outline",
                 "device": device,
@@ -177,6 +177,24 @@ class HomeAssistantReporter:
             client.disconnect()
             client.loop_stop()
 
+    async def _publish_with_retry(self, messages, attempts: int = 3):
+        """Tolerate short HA/MQTT outages during updates or restarts."""
+        for attempt in range(1, attempts + 1):
+            try:
+                await asyncio.to_thread(self._publish, messages)
+                return
+            except Exception:
+                if attempt == attempts:
+                    raise
+                delay = attempt * 5
+                logger.warning(
+                    "Home Assistant MQTT 发布失败，%s 秒后重试 (%s/%s)",
+                    delay,
+                    attempt,
+                    attempts,
+                )
+                await asyncio.sleep(delay)
+
     async def publish_success(self, db_path, mode: str, counts: dict):
         try:
             snapshot = read_energy_snapshot(db_path)
@@ -194,7 +212,7 @@ class HomeAssistantReporter:
                 (self._topic("health/status"), "ok"),
                 (self._topic("health/details"), json.dumps(details)),
             ]
-            await asyncio.to_thread(self._publish, messages)
+            await self._publish_with_retry(messages)
             logger.info("Home Assistant MQTT 状态发布成功")
         except Exception as exc:
             logger.error("Home Assistant MQTT 发布失败: %s", exc)
@@ -208,12 +226,11 @@ class HomeAssistantReporter:
             "at": datetime.now(JST).isoformat(),
         }
         try:
-            await asyncio.to_thread(
-                self._publish,
+            await self._publish_with_retry(
                 self.discovery_messages() + [
                     (self._topic("health/status"), status),
                     (self._topic("health/details"), json.dumps(details, ensure_ascii=False)),
-                ],
+                ]
             )
         except Exception as exc:
             logger.error("Home Assistant MQTT 告警发布失败: %s", exc)

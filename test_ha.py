@@ -48,9 +48,24 @@ class MQTTReporterTests(unittest.IsolatedAsyncioTestCase):
             "homeassistant/sensor/kyuden/matter_total_energy/config"
         ]
         self.assertIn('"device_class": "energy"', matter)
-        self.assertIn('"state_class": "measurement"', matter)
+        self.assertIn('"state_class": "total_increasing"', matter)
         self.assertIn('"unit_of_measurement": "kWh"', matter)
         self.assertIn('"state_topic": "kyuden/energy/total_kwh"', matter)
+
+    async def test_mqtt_publish_retries_transient_failure(self):
+        attempts = []
+
+        def publish(messages):
+            attempts.append(messages)
+            if len(attempts) < 3:
+                raise OSError("temporary outage")
+
+        self.reporter._publish = publish
+        with patch("kyuden.ha.asyncio.sleep", return_value=None) as sleep:
+            await self.reporter._publish_with_retry([("topic", "value")])
+
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [5, 10])
 
     async def test_auth_alert_has_dedicated_state(self):
         published = []

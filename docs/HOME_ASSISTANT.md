@@ -21,7 +21,7 @@ KYUDEN_MQTT_PASSWORD=replace_me
 ## Matterbridge / Apple Home
 
 `Matter Cumulative Energy` 与 `Total Energy` 使用相同的累计 kWh 状态，但按
-`matterbridge-hass` 当前要求声明为 `state_class: measurement`。它只用于
+当前部署的 `matterbridge-hass` 要求声明为 `state_class: total_increasing`。它只用于
 Matterbridge，不要把它加入 HA Energy Dashboard；Energy Dashboard 继续使用
 `Total Energy`。
 
