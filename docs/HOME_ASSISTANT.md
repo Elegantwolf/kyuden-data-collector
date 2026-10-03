@@ -14,7 +14,28 @@ KYUDEN_MQTT_PASSWORD=replace_me
 # KYUDEN_MQTT_TLS=true
 ```
 
-下一次成功采集会发布 retained discovery 和状态。HA 中应出现 `Kyuden Data Collector` 设备。把其中的 `Today Energy`（单位 kWh，energy，state class total_increasing）添加到 Settings > Dashboards > Energy 的电网用电来源。该实体每天归零，避免次日修订前一天结算值时把修订量错误记到当天。
+下一次成功采集会发布 retained discovery 和状态。HA 中应出现 `Kyuden Data Collector` 设备。`Today Energy` 用于普通卡片展示，不再建议作为 Energy Dashboard 的来源：九电小时数据有延迟，跨日后补采不能修复 MQTT 实体已经生成的旧统计。
+
+## 按真实小时回填 Energy Dashboard
+
+启用可选的本地 HA WebSocket 统计同步，在被 Git 忽略的 `secrets/kyuden.env` 添加：
+
+```sh
+KYUDEN_HA_URL=http://homeassistant.local:8123
+KYUDEN_HA_TOKEN=replace_with_admin_long_lived_token
+```
+
+令牌需有管理员权限，只保存在本机权限 600 的 secrets 文件中。采集成功后会将 SQLite 小时数据按 JST 的真实发生时间转换成 UTC，调用 HA 的 `recorder/import_statistics`，写入独立外部统计 `kyuden:consumption`（Kyuden Hourly Consumption）。该 API 会异步排队，接受请求不等同于 recorder 已完成写入；首次启用后需在 HA 统计页面核对。
+
+Energy Dashboard 的电网来源应**替换**为该外部统计，不要与 Today Energy 同时添加，否则重复计量。不删除或改写原 MQTT 实体历史。每次同步幂等重放，补采/修订以前小时后会重算后续累计值，不把历史用电挪到采集时间。缺失小时不会伪造为零或平均分摊。
+
+定时采集自动检查近三天不足 24 小时或与日结电量不符的日期；每日任务另刷新昨天。手动批量回填（最多 62 天，保留既有 profile 和锁）：
+
+```sh
+python -m kyuden --mode both --backfill-days 18 --db data/kyuden.sqlite
+```
+
+需在运行前加载 secrets 环境。批量补采只读取九电的真实历史页面，验证日期后 UPSERT，不会把今天图表改标成昨天。回填前建议通过 SQLite backup API 保存一致性备份。
 
 累计值采用“已完成日期的 daily 数据 + 当天 hourly 数据”，避免同一天重复计算。它从本地数据库现有数据起算，不等同于电表终身读数；清空数据库会使 HA 看到一次基线变化。
 
@@ -22,8 +43,8 @@ KYUDEN_MQTT_PASSWORD=replace_me
 
 `Matter Cumulative Energy` 与 `Total Energy` 使用相同的累计 kWh 状态，但按
 当前部署的 `matterbridge-hass` 要求声明为 `state_class: total_increasing`。它只用于
-Matterbridge，不要把它加入 HA Energy Dashboard；Energy Dashboard 使用每天归零的
-`Today Energy`。
+Matterbridge，不要把它加入 HA Energy Dashboard；Energy Dashboard 使用外部统计
+`kyuden:consumption`。
 
 Apple Home 不显示桥接后的独立 `electricalSensor`，因此采集器还提供一个始终为 ON
 的 `Power Meter` MQTT switch，作为 Matter plug-in-unit 的可见外壳。Matterbridge 中
@@ -36,11 +57,15 @@ Apple Home 不显示桥接后的独立 `electricalSensor`，因此采集器还�
 
 MQTT 状态实体会发布：
 
-- `ok`：采集和入库成功。
+- `ok`：采集、入库及已配置的发布路径成功（MQTT 已收到 PUBACK）。
 - `auth_required`：登录过期，需要运行人工登录。
 - `failed`：其他采集失败。
 
 可在 HA 中以 Collector Status 的状态变化建立自动化。详细错误上下文作为该实体的 MQTT JSON attributes 发布。
+
+状态超过三小时无新消息会在 HA 中变为 unavailable，避免 retained `ok` 永久掩盖停机。网络超时/九电错误页面按采集失败处理，只在明确进入身份提供商登录页面时报告 `auth_required`。
+
+进程退出码：0 成功；1 采集失败；20 明确需要人工登录；21 数据已保存但 MQTT 发布失败；22 数据已保存但 HA 历史同步失败。发布失败不会回滚 SQLite，下次采集会重发最新 MQTT 状态并重新同步历史。
 
 现有 webhook 仍可同时使用。在 HA 创建一个仅限本地的 webhook automation，并把下面地址写入同一个本地 env 文件：
 

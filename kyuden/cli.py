@@ -6,13 +6,15 @@ import sys
 from pathlib import Path
 from .settings import DEFAULT_DB_PATH, DEFAULT_PROFILE_DIR, DEFAULT_LOCK_PATH
 from .locking import collector_lock
-from .ha import HomeAssistantReporter, MQTTConfig
+from .ha import HomeAssistantReporter, MQTTConfig, MQTTDeliveryError
 from .notifications import build_alert_handler, combine_alert_handlers
 from .scraper import AuthenticationRequiredError
 from .service import run_collect, run_interactive_login
+from .statistics import StatisticsConfig, StatisticsReporter, StatisticsDeliveryError
 
 logger = logging.getLogger(__name__)
 AUTH_REQUIRED_EXIT_CODE = 20
+MQTT_FAILED_EXIT_CODE = 21
 
 def _env_bool(name: str, default: bool) -> bool:
     value = os.getenv(name)
@@ -26,7 +28,8 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description="Kyuden collector (scrape + SQLite upsert)")
     parser.add_argument("-m", "--mode", choices=["daily", "hourly", "both"], default="hourly")
-    parser.add_argument("--hourly-date", help="仅支持日本时区当天（YYYY-MM-DD），不支持历史回填")
+    parser.add_argument("--hourly-date", help="真实小时页面目标日期（YYYY-MM-DD，最近 62 天）")
+    parser.add_argument("--backfill-days", type=int, default=0, help="额外回填最近 N 个完整日期，0..62")
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="SQLite 文件路径")
     parser.add_argument(
         "--profile-dir",
@@ -55,6 +58,7 @@ def main():
     lock_path = Path(os.getenv("KYUDEN_LOCK", str(DEFAULT_LOCK_PATH))).expanduser().resolve()
     lock_timeout = float(os.getenv("KYUDEN_LOCK_TIMEOUT", "180"))
     mqtt_config = MQTTConfig.from_env()
+    statistics_config = StatisticsConfig.from_env()
     ha_reporter = HomeAssistantReporter(mqtt_config) if mqtt_config else None
     alert_handler = combine_alert_handlers(
         build_alert_handler(os.getenv("KYUDEN_NOTIFY_WEBHOOK")),
@@ -78,6 +82,8 @@ def main():
                     headless=not args.headed and _env_bool("KYUDEN_HEADLESS", True),
                     alert_handler=alert_handler,
                     ha_reporter=ha_reporter,
+                    backfill_days=args.backfill_days,
+                    statistics_reporter=StatisticsReporter(statistics_config) if statistics_config else None,
                 )
             )
             return 0
@@ -86,6 +92,17 @@ def main():
             "登录状态已失效。请运行: python collector.py --interactive-login"
         )
         return AUTH_REQUIRED_EXIT_CODE
+    except MQTTDeliveryError:
+        logger.error("数据已入库，但 MQTT 发布失败（退出码 21）；下次运行重发最新状态")
+        webhook = build_alert_handler(os.getenv("KYUDEN_NOTIFY_WEBHOOK"))
+        if webhook:
+            asyncio.run(webhook("MQTT 发布失败，数据已保存", {"stage": "mqtt", "status": "failed"}))
+        return MQTT_FAILED_EXIT_CODE
+    except StatisticsDeliveryError:
+        logger.error("数据已入库，但 HA 历史同步失败（退出码 22）")
+        if alert_handler:
+            asyncio.run(alert_handler("HA 历史同步失败，数据已保存", {"stage": "ha_statistics", "status": "failed"}))
+        return 22
     except Exception as exc:
         logger.error("采集失败: %s", exc)
         if alert_handler:

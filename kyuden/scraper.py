@@ -3,7 +3,7 @@ import asyncio
 import json
 import html
 import random
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from playwright.async_api import async_playwright
 import logging
 from pathlib import Path
@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 
 class AuthenticationRequiredError(RuntimeError):
     """The persisted browser profile must be authenticated by a human."""
+
+
+class LoginCheckError(RuntimeError):
+    """The site is unavailable; this does not prove the session has expired."""
 
 class KyudenScraper:
     def __init__(
@@ -148,24 +152,23 @@ class KyudenScraper:
                 logger.error(f"报警回调执行失败: {e}")
 
     async def is_logged_in(self) -> bool:
-        try:
-            await self.page.goto(
-                self.login_url,
-                wait_until="domcontentloaded",
-                timeout=30000,
-            )
-            # The account URL is briefly visible before the site's client-side
-            # authentication redirect. Checking it immediately creates a false
-            # positive and closes the manual-login window before login begins.
-            await self.page.wait_for_timeout(2500)
-            parsed = urlparse(self.page.url)
-            logger.info("登录状态检查落点: %s%s", parsed.hostname, parsed.path)
-            if parsed.hostname == "id.kyuden.co.jp":
-                return False
-            return parsed.hostname == "my.kyuden.co.jp" and parsed.path.endswith("/member/account")
-        except Exception as e:
-            logger.warning(f"登录状态检查异常: {e}")
-            return False
+        for attempt in range(2):
+            try:
+                await self.page.goto(self.login_url, wait_until="domcontentloaded", timeout=30000)
+                # Let the client-side authentication redirect settle.
+                await self.page.wait_for_timeout(2500)
+                parsed = urlparse(self.page.url)
+                logger.info("登录状态检查落点: %s%s", parsed.hostname, parsed.path)
+                if parsed.hostname == "id.kyuden.co.jp":
+                    return False
+                if parsed.hostname == "my.kyuden.co.jp" and parsed.path.endswith("/member/account"):
+                    return True
+                raise LoginCheckError("登录检查进入非账户页面，不能判定登录失效")
+            except Exception as exc:
+                logger.warning("登录检查暂时失败 (%s/2): %s", attempt + 1, type(exc).__name__)
+                if attempt == 1:
+                    raise LoginCheckError("九电登录检查不可用，请稍后重试；保留现有登录凭据") from exc
+                await asyncio.sleep(3)
 
     async def interactive_login(self, timeout_seconds: int = 900) -> bool:
         """打开可见 Chrome，等待用户完成登录或验证。"""
@@ -357,8 +360,24 @@ class KyudenScraper:
             logger.error(f"获取每日数据失败: {e}")
             raise
 
-    async def get_hourly_usage_data(self, target_date: Optional[date] = None):
-        """获取每小时用电量数据（允许传入目标日期归属）"""
+    async def _hourly_page_date(self) -> date:
+        """Verify the server's selected date, never relabel today's chart."""
+        yesterday = await self.page.locator('#body_0_Yesterday').input_value()
+        tomorrow = await self.page.locator('#body_0_Tomorrow').input_value()
+        selected = datetime.strptime(yesterday, "%Y%m%d").date() + timedelta(days=1)
+        if datetime.strptime(tomorrow, "%Y%m%d").date() - timedelta(days=1) != selected:
+            raise ValueError("小时页面日期控件不一致，拒绝保存")
+        return selected
+
+    async def _read_hourly_chart(self, selected_date: date):
+        element = await self.page.query_selector('input[name="body_0$Data"]')
+        value = await element.get_attribute('value') if element else None
+        if not value:
+            raise ValueError("小时图表数据为空")
+        return self.parse_hourly_usage_data(json.loads(html.unescape(value)), target_date=selected_date)
+
+    async def get_hourly_usage_data(self, target_date: Optional[date] = None, backfill_dates=()):
+        """Read genuine charts, traversing previous-day form controls once."""
         await self.page.wait_for_load_state('networkidle')
         await self._random_delay(1, 2)  # 随机等待
         await self.page.goto(self.account_url, timeout=10000)
@@ -367,19 +386,27 @@ class KyudenScraper:
         await self.page.wait_for_load_state('domcontentloaded')
         await self._random_delay(1, 3)  # 等待数据加载
         logger.info("导航到每小时图表页面完成")
-        try:
-            data_element = await self.page.query_selector('input[name="body_0$Data"]')
-            if not data_element:
-                raise Exception("未找到数据元素")
-            data_value = await data_element.get_attribute('value')
-            if not data_value:
-                raise Exception("数据为空")
-            usage_data = json.loads(html.unescape(data_value))
-            logger.info("成功获取每小时原始数据")
-            return self.parse_hourly_usage_data(usage_data, target_date=target_date)
-        except Exception as e:
-            logger.error(f"获取每小时用电量数据失败: {e}")
-            raise
+        selected = await self._hourly_page_date()
+        requested = {target_date or selected, *backfill_dates}
+        if any(d > selected or (selected - d).days > 62 for d in requested):
+            raise ValueError("小时回填日期必须在页面日期之前的 62 天内")
+        rows = []
+        while True:
+            if selected in requested:
+                data = await self._read_hourly_chart(selected)
+                rows.extend(data)
+                logger.info("小时图表日期=%s，记录=%s", selected, len(data))
+            if selected == min(requested):
+                return rows
+            previous = selected - timedelta(days=1)
+            async with self.page.expect_navigation(wait_until="domcontentloaded", timeout=30000):
+                # The site's overlay intercepts pointer clicks on this submit
+                # control. Invoke its ordinary click/form handler instead.
+                await self.page.locator('#body_0_BtnPreDate').evaluate("element => element.click()")
+            selected = await self._hourly_page_date()
+            if selected != previous:
+                raise ValueError("小时页面未切换到预期日期，拒绝保存")
+            await self._random_delay(1, 2)
 
     parse_usage_data = staticmethod(parse_daily)
     parse_hourly_usage_data = staticmethod(parse_hourly)
@@ -416,11 +443,12 @@ class KyudenScraper:
         allow_password_login: bool = False,
         max_login_retries: Optional[int] = None,
         alert_handler: Optional[Callable[[str, Dict[str, Any]], Union[None, Awaitable[None]]]] = None,
+        hourly_backfill_dates=(),
     ):
         """
         完整爬取流程
         mode: 'daily' | 'hourly' | 'both'
-        hourly_target_date: 仅允许日本时区当天，不提供历史页面导航
+        hourly_target_date: 验证页面实际日期后读取，最多回填 62 天
         """
         if mode not in ('daily', 'hourly', 'both'):
             raise ValueError("未知采集模式")
@@ -441,8 +469,10 @@ class KyudenScraper:
         elif isinstance(hourly_target_date, date):
             target_date_obj = hourly_target_date
 
-        if target_date_obj and target_date_obj != datetime.now(JST).date():
-            raise ValueError("当前小时采集不支持历史日期；不能将当前图表改标为其他日期")
+        today = datetime.now(JST).date()
+        requested_dates = [*hourly_backfill_dates, *([target_date_obj] if target_date_obj else [])]
+        if any(d > today or (today - d).days > 62 for d in requested_dates):
+            raise ValueError("小时回填日期必须在最近 62 天内")
 
         try:
             await self.init_browser(headless=headless, use_storage_state=True)
@@ -457,8 +487,10 @@ class KyudenScraper:
             daily_data = hourly_data = None
             if mode in ('daily','both'):
                 daily_data = await self.get_daily_usage_data()
-            if mode in ('hourly','both'):
-                hourly_data = await self.get_hourly_usage_data(target_date=target_date_obj)
+            if mode in ('hourly','both') or hourly_backfill_dates:
+                hourly_data = await self.get_hourly_usage_data(
+                    target_date=target_date_obj, backfill_dates=hourly_backfill_dates,
+                )
 
             self.save(
                 daily=daily_data if mode!='hourly' else None,

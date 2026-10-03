@@ -1,11 +1,38 @@
 """Coordinate collection and persistence."""
 import os
 import logging
+import sqlite3
+from contextlib import closing
+from datetime import datetime, timedelta
 from pathlib import Path
+from .parsing import JST
 from .scraper import KyudenScraper
 from .storage import KyudenSQLite
 
 logger = logging.getLogger(__name__)
+
+
+def plan_hourly_backfill(db_path, mode, backfill_days=0, today=None):
+    """Repair recent gaps and settled corrections; never skip across midnight."""
+    today = today or datetime.now(JST).date()
+    if not 0 <= backfill_days <= 62:
+        raise ValueError("backfill_days 必须在 0..62 之间")
+    if backfill_days:
+        return [today - timedelta(days=i) for i in range(1, backfill_days + 1)]
+    candidates = [today - timedelta(days=i) for i in range(1, 4)]
+    if not Path(db_path).exists():
+        return candidates[:1]
+    with closing(sqlite3.connect(f"file:{Path(db_path).resolve()}?mode=ro", uri=True)) as conn:
+        rows = conn.execute("""SELECT h.date, COUNT(*), SUM(h.usage_kwh), d.usage_kwh
+            FROM hourly_usage h LEFT JOIN daily_usage d ON d.date=h.date
+            GROUP BY h.date""").fetchall()
+    known = {row[0]: row[1:] for row in rows}
+    return [d for d in candidates if
+            (mode in ("daily", "both") and d == candidates[0]) or
+            d.isoformat() not in known or known[d.isoformat()][0] < 24 or
+            (known[d.isoformat()][2] is not None and
+             abs(known[d.isoformat()][1] - known[d.isoformat()][2]) > 0.051)]
+
 
 async def run_collect(
     mode: str,
@@ -15,6 +42,8 @@ async def run_collect(
     headless: bool,
     alert_handler=None,
     ha_reporter=None,
+    backfill_days=0,
+    statistics_reporter=None,
 ):
     scraper = KyudenScraper(
         profile_dir=profile_dir,
@@ -31,6 +60,8 @@ async def run_collect(
         hourly_target_date=hourly_target_date,
         profile_dir=profile_dir,
         allow_password_login=False,
+        hourly_backfill_dates=plan_hourly_backfill(db_path, mode, backfill_days)
+        if not hourly_target_date else (),
     )
 
     expected = ("daily", "hourly") if mode == "both" else (mode,)
@@ -47,6 +78,8 @@ async def run_collect(
         n2 = db.upsert_hourly(hourly_rows) if hourly_rows else 0
         logger.info(f"upsert daily={n1}, hourly={n2}")
 
+    if statistics_reporter:
+        await statistics_reporter.publish(db_path)
     if ha_reporter:
         await ha_reporter.publish_success(
             db_path,

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 from collector import collector_lock
 from kyuden_scraper import AuthenticationRequiredError, KyudenScraper
+from kyuden.scraper import LoginCheckError
 
 
 class FakePage:
@@ -41,11 +42,34 @@ class AuthenticationStateTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(await scraper.is_logged_in())
 
-    async def test_error_page_is_logged_out(self):
+    async def test_error_page_does_not_prove_auth_expiry(self):
         scraper = KyudenScraper(browser_channel=None)
         scraper.page = FakePage("https://my.kyuden.co.jp/ja-JP/error")
 
-        self.assertFalse(await scraper.is_logged_in())
+        from unittest.mock import patch
+        with patch("kyuden.scraper.asyncio.sleep", new=AsyncMock()):
+            with self.assertRaises(LoginCheckError):
+                await scraper.is_logged_in()
+
+    async def test_timeout_never_requests_human_login(self):
+        from unittest.mock import patch
+        scraper = KyudenScraper()
+        scraper.page = FakePage("https://id.kyuden.co.jp/login")
+        scraper.page.goto = AsyncMock(side_effect=TimeoutError())
+        scraper._notify_alert = AsyncMock()
+        with patch("kyuden.scraper.asyncio.sleep", new=AsyncMock()):
+            with self.assertRaises(LoginCheckError):
+                await scraper.ensure_logged_in(None, None)
+        self.assertEqual(scraper.page.goto.await_count, 2)
+        scraper._notify_alert.assert_not_awaited()
+
+    async def test_transient_timeout_recovers_on_second_check(self):
+        from unittest.mock import patch
+        scraper = KyudenScraper()
+        scraper.page = FakePage("https://my.kyuden.co.jp/member/account")
+        scraper.page.goto = AsyncMock(side_effect=[TimeoutError(), None])
+        with patch("kyuden.scraper.asyncio.sleep", new=AsyncMock()):
+            self.assertTrue(await scraper.is_logged_in())
 
     async def test_scheduled_collection_never_retries_password_login(self):
         scraper = KyudenScraper(browser_channel=None)

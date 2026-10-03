@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,10 @@ from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 JST = ZoneInfo("Asia/Tokyo")
+
+
+class MQTTDeliveryError(RuntimeError):
+    """Collection is persisted, but broker acknowledgement is unconfirmed."""
 
 
 @dataclass(frozen=True)
@@ -162,6 +167,7 @@ class HomeAssistantReporter:
                 "json_attributes_topic": self._topic("health/details"),
                 "unique_id": "kyuden_collector_status",
                 "icon": "mdi:transmission-tower",
+                "expire_after": 10800,
                 "device": device,
             },
         }
@@ -184,6 +190,15 @@ class HomeAssistantReporter:
             mqtt.CallbackAPIVersion.VERSION2,
             client_id="kyuden-data-collector",
         )
+        connected = threading.Event()
+        connection_errors = []
+
+        def on_connect(_client, _userdata, _flags, reason_code, _properties):
+            if reason_code.is_failure:
+                connection_errors.append(str(reason_code))
+            connected.set()
+
+        client.on_connect = on_connect
         if self.config.username:
             client.username_pw_set(self.config.username, self.config.password)
         if self.config.tls:
@@ -191,9 +206,15 @@ class HomeAssistantReporter:
         client.connect(self.config.host, self.config.port, keepalive=20)
         client.loop_start()
         try:
+            if not connected.wait(10) or connection_errors:
+                raise MQTTDeliveryError("MQTT broker 未确认连接或拒绝认证")
             for topic, payload in messages:
                 info = client.publish(topic, payload, qos=1, retain=True)
+                if info.rc != mqtt.MQTT_ERR_SUCCESS:
+                    raise MQTTDeliveryError("MQTT 消息未被接受")
                 info.wait_for_publish(timeout=10)
+                if not info.is_published():
+                    raise MQTTDeliveryError("MQTT 消息未收到 PUBACK")
         finally:
             client.disconnect()
             client.loop_stop()
@@ -231,13 +252,15 @@ class HomeAssistantReporter:
                 (self._topic("energy/total_kwh"), str(snapshot.total_kwh)),
                 (self._topic("matter/outlet/state"), "ON"),
                 (self._topic("health/last_collected"), snapshot.last_collected_at),
-                (self._topic("health/status"), "ok"),
                 (self._topic("health/details"), json.dumps(details)),
+                # Publish ok last, only after all preceding payloads are ACKed.
+                (self._topic("health/status"), "ok"),
             ]
             await self._publish_with_retry(messages)
             logger.info("Home Assistant MQTT 状态发布成功")
         except Exception as exc:
-            logger.error("Home Assistant MQTT 发布失败: %s", exc)
+            logger.error("Home Assistant MQTT 发布失败: %s", type(exc).__name__)
+            raise MQTTDeliveryError("MQTT 状态发布失败，采集数据已保留") from exc
 
     async def send_alert(self, message: str, context: dict):
         status = "auth_required" if context.get("status") == "auth_required" else "failed"
