@@ -32,7 +32,7 @@ def main():
     parser.add_argument("--backfill-days", type=int, default=0, help="额外回填最近 N 个完整日期，0..62")
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="SQLite 文件路径")
     parser.add_argument("--publish-displays-only", action="store_true",
-                        help="仅从已有 SQLite 更新虚拟显示插座，不爬取、不改统计/采集成功时间")
+                        help="仅从已有 SQLite 更新虚拟显示插座，不爬取、不改 SQLite/采集成功时间")
     parser.add_argument(
         "--profile-dir",
         default=os.getenv("KYUDEN_PROFILE_DIR", str(DEFAULT_PROFILE_DIR)),

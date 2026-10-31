@@ -100,6 +100,14 @@ python scripts/configure_apple_displays.py --matterbridge-url http://HA_IP:8283 
 若插件的 host 是 add-on 内部地址，可补上 `--ha-url http://HA_IP:8123`，
 指向**同一 HA 实例**的局域网地址，不会更改插件的既有 host 或凭据。
 
+验收不能仅看 HA 数值或出现插座：Matter 端必须同时有 OnOffPlugInUnit (0x010A)、
+ElectricalSensor (0x0510) 和 ElectricalPowerMeasurement.activePower。
+后者使用 mW，例如 HA 的 200 W 应输出 200000，6 W 应输出 6000。
+省略 measurement 标记时，插件会忽略 sensor，生成只有开关的设备。
+插件热重载请求被接受不代表设备注册完成；若长期 locked 且注册数为零，
+应检查初始化情况，必要时使用后台正常服务重启，保留配置和 Matter 配对，
+**不要使用 reset/factory reset 或反复重配整个桥**。
+
 Apple Home 的设备命名、小数显示及卡片更新需手机实测。HA 区域不保证自动变成
 Apple Home 房间，请在家庭 App 将这两个设备放到单独的“用电信息”房间。
 **两个显示值可能混入 Apple Home 家庭/房间的功率汇总，该汇总不能再当成物理功率。**
