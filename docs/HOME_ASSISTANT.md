@@ -53,6 +53,56 @@ Apple Home 不显示桥接后的独立 `electricalSensor`，因此采集器还�
 
 该兼容设备没有伪造即时功率：九州电力页面提供的是分时电量，不是实时 W、V 或 A。
 
+## Apple Home 的两个数值显示插座（实验性，默认关闭）
+
+此功能用于“在家庭 App 看数”，不提供原生历史电量图表。只在本地
+`secrets/kyuden.env` 启用：
+
+```sh
+KYUDEN_APPLE_DISPLAY_PLUGS=true
+```
+
+- `Kyuden 最近小时均功率`：最近一个已结束、已经采到的小时电量 × 1000 W。
+  如 0.35 kWh → 350 W；不是当前实时功率。数据区间和采集时间保存在 HA 实体属性。
+- `Kyuden 昨日用电〔W即度数〕`：昨天的日结 kWh 数字直接编码为 W。
+  如 6.7 kWh → 6.7 W；**仅显示编码，不是真实功率**，不要用于自动化/计费。
+
+两个设备各有独立 identifiers、虚拟 outlet 和 power sensor；命令发布到专属且无消费者
+的 `kyuden/display/.../outlet/set`，不关联任何真实灯、插座或继电器。
+传感器不声明 state_class、不提供虚构 energy，不参与 HA 长期统计或 Energy Dashboard。
+缺昨天日结时不可用，不回退到前天；近期数据区间/采集时间过期也不可用，不伪造零。
+连续三小时未收到刷新，power sensor 在 HA 中过期。日结数据每天自然切换。
+
+配置会在正常定时采集成功后发布。无需重新登录或爬取的手动刷新：
+
+```sh
+# 运行前加载 secrets 环境，使用现有 MQTT 配置
+python -m kyuden --publish-displays-only --db data/kyuden.sqlite
+```
+
+它只读 SQLite，只发布四个新 discovery 配置及 display 专属主题，
+不改数据库、不更新“最后采集”或采集成功状态、不操作原 Power Meter。
+
+现有 Matterbridge-hass 可将每个新 HA 设备的 switch 和 power 合并暴露。
+辅助配置脚本默认只检查；--apply 才创建 HA“用电信息”区域、将两个设备加入
+**现有白名单**并只重启 HA 插件，不重置桥、不修改配对，不改变已有实体。
+脚本在内存中复用该插件既有 HA 连接配置，不新建令牌；应用前保存含凭据的
+config 备份到 `secrets/display-backups`，权限 600，禁止上传。
+
+```sh
+python scripts/configure_apple_displays.py --matterbridge-url http://HA_IP:8283
+python scripts/configure_apple_displays.py --matterbridge-url http://HA_IP:8283 --apply
+```
+
+Apple Home 的设备命名、小数显示及卡片更新需手机实测。HA 区域不保证自动变成
+Apple Home 房间，请在家庭 App 将这两个设备放到单独的“用电信息”房间。
+**两个显示值可能混入 Apple Home 家庭/房间的功率汇总，该汇总不能再当成物理功率。**
+不应将整屋读数与分项读数一起用于真实统计。
+
+回滚：恢复上述受保护的 Matterbridge 配置备份，关闭环境开关；若要移除 HA
+显示实体，仅清除 `homeassistant/{switch,sensor}/kyuden_display/` 下本功能的四条
+retained discovery 配置，不要清理整个 `homeassistant/#` 或 `kyuden/#`。
+
 ## 登录失效和采集失败
 
 MQTT 状态实体会发布：

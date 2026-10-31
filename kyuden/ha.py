@@ -71,6 +71,7 @@ class MQTTConfig:
     base_topic: str = "kyuden"
     discovery_prefix: str = "homeassistant"
     tls: bool = False
+    apple_display_plugs: bool = False
 
     @classmethod
     def from_env(cls):
@@ -87,6 +88,8 @@ class MQTTConfig:
                 "KYUDEN_MQTT_DISCOVERY_PREFIX", "homeassistant"
             ).strip("/"),
             tls=os.getenv("KYUDEN_MQTT_TLS", "false").lower()
+            in {"1", "true", "yes", "on"},
+            apple_display_plugs=os.getenv("KYUDEN_APPLE_DISPLAY_PLUGS", "false").lower()
             in {"1", "true", "yes", "on"},
         )
 
@@ -181,6 +184,9 @@ class HomeAssistantReporter:
                     json.dumps(payload, ensure_ascii=False),
                 )
             )
+        if self.config.apple_display_plugs:
+            from .display_plugs import discovery_messages
+            messages += discovery_messages(self.config.base_topic, self.config.discovery_prefix)
         return messages
 
     def _publish(self, messages):
@@ -247,7 +253,11 @@ class HomeAssistantReporter:
                 "hourly_rows": counts.get("hourly", 0),
                 "at": snapshot.last_collected_at,
             }
-            messages = self.discovery_messages() + [
+            display_messages = []
+            if self.config.apple_display_plugs:
+                from .display_plugs import state_messages
+                display_messages = state_messages(db_path, self.config.base_topic)
+            messages = self.discovery_messages() + display_messages + [
                 (self._topic("energy/today_kwh"), str(snapshot.today_kwh)),
                 (self._topic("energy/total_kwh"), str(snapshot.total_kwh)),
                 (self._topic("matter/outlet/state"), "ON"),
@@ -261,6 +271,18 @@ class HomeAssistantReporter:
         except Exception as exc:
             logger.error("Home Assistant MQTT 发布失败: %s", type(exc).__name__)
             raise MQTTDeliveryError("MQTT 状态发布失败，采集数据已保留") from exc
+
+    async def publish_displays(self, db_path):
+        """Refresh only display outlets, without claiming a new collection."""
+        if not self.config.apple_display_plugs:
+            raise ValueError("请先启用 KYUDEN_APPLE_DISPLAY_PLUGS")
+        from .display_plugs import discovery_messages, state_messages
+        messages = discovery_messages(self.config.base_topic, self.config.discovery_prefix)
+        messages += state_messages(db_path, self.config.base_topic)
+        try:
+            await self._publish_with_retry(messages)
+        except Exception as exc:
+            raise MQTTDeliveryError("显示插座发布失败，数据库未修改") from exc
 
     async def send_alert(self, message: str, context: dict):
         status = "auth_required" if context.get("status") == "auth_required" else "failed"

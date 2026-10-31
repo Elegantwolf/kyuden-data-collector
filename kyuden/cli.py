@@ -31,6 +31,8 @@ def main():
     parser.add_argument("--hourly-date", help="真实小时页面目标日期（YYYY-MM-DD，最近 62 天）")
     parser.add_argument("--backfill-days", type=int, default=0, help="额外回填最近 N 个完整日期，0..62")
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="SQLite 文件路径")
+    parser.add_argument("--publish-displays-only", action="store_true",
+                        help="仅从已有 SQLite 更新虚拟显示插座，不爬取、不改统计/采集成功时间")
     parser.add_argument(
         "--profile-dir",
         default=os.getenv("KYUDEN_PROFILE_DIR", str(DEFAULT_PROFILE_DIR)),
@@ -67,6 +69,13 @@ def main():
 
     try:
         with collector_lock(lock_path, timeout_seconds=lock_timeout):
+            if args.publish_displays_only:
+                if args.interactive_login:
+                    raise ValueError("显示刷新不能与人工登录同时执行")
+                if not ha_reporter:
+                    raise ValueError("显示插座需要配置 MQTT")
+                asyncio.run(ha_reporter.publish_displays(args.db))
+                return 0
             if args.interactive_login:
                 ok = asyncio.run(
                     run_interactive_login(profile_dir, args.auth_timeout, alert_handler)
