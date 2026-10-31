@@ -69,8 +69,12 @@ KYUDEN_APPLE_DISPLAY_PLUGS=true
 
 两个设备各有独立 identifiers、虚拟 outlet 和 power sensor；命令发布到专属且无消费者
 的 `kyuden/display/.../outlet/set`，不关联任何真实灯、插座或继电器。
-英文短名不改变 identifiers、entity_id、数值含义或配对。辅助配置工具仅将白名单中
-本功能的旧中文长名替换为英文短名；若短名与其他 HA 设备冲突则停止。可用
+**内部桥接名称必须保持最初的中文名称不变。** matterbridge-hass 1.6 的 MutableDevice
+使用 `new MatterbridgeEndpoint(..., { id: this.deviceName })`；即使 HA device ID 和序列号
+不变，修改设备名也会换端点编号，使 Apple Home 丢失原卡片/房间绑定。
+英文短名 Hour Avg / Yesterday 只能在 Apple Home 配件设置中改，不改 HA/MQTT 设备名、
+name_by_user 或插件命名后缀。辅助配置工具会撤销本功能误加入白名单的英文身份名称，
+恢复原始内部名；不会修改其他设备。可用
 `--no-restart` 仅保存配置，之后按后台正常服务重启流程应用，避免插件热重载卡住。
 Matterbridge-hass 要求功率传感器声明 `state_class: measurement` 才创建电气测量 cluster。
 因此 HA 可能为这两个新 W 实体保存独立的短期/长期均值历史；昨天实体的历史仅是显示编码，

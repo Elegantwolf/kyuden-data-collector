@@ -16,7 +16,7 @@ from urllib.parse import urlparse, urlunparse
 from websockets.sync.client import connect
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kyuden.display_plugs import DISPLAYS, LEGACY_DISPLAY_NAMES
+from kyuden.display_plugs import DISPLAYS, DISPLAY_LABELS
 
 
 class RPC:
@@ -51,7 +51,9 @@ def whitelist_displays(config, entities):
         raise ValueError("Existing area/label filter requires manual review; nothing changed")
     # An empty whitelist means ALL existing devices; don't narrow it accidentally.
     if updated.get("whiteList"):
-        kept = [name for name in updated["whiteList"] if name not in LEGACY_DISPLAY_NAMES.values()]
+        # Retire the accidental English identity names; restore the original
+        # stable names so Matter storage assigns the original endpoint numbers.
+        kept = [name for name in updated["whiteList"] if name not in DISPLAY_LABELS.values()]
         updated["whiteList"] = list(dict.fromkeys([*kept, *DISPLAYS.values()]))
     if updated.get("entityWhiteList"):
         updated["entityWhiteList"] = list(dict.fromkeys([*updated["entityWhiteList"], *entities]))

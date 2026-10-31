@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from kyuden.display_plugs import DISPLAYS, LEGACY_DISPLAY_NAMES, discovery_messages, state_messages
+from kyuden.display_plugs import DISPLAYS, DISPLAY_LABELS, discovery_messages, state_messages
 from kyuden.ha import HomeAssistantReporter, MQTTConfig
 from kyuden.parsing import JST
 from kyuden.storage import KyudenSQLite
@@ -100,11 +100,17 @@ class DisplayPlugTests(unittest.TestCase):
     def test_empty_whitelist_keeps_its_existing_all_devices_semantics(self):
         self.assertEqual(whitelist_displays({"whiteList":[]},[])["whiteList"],[])
 
-    def test_short_english_names_migrate_only_our_old_whitelist_entries(self):
-        config = {"whiteList":["Kyuden Data Collector",*LEGACY_DISPLAY_NAMES.values(),"Bedroom Light"]}
+    def test_restore_only_our_accidentally_renamed_bridge_identities(self):
+        config = {"whiteList":["Kyuden Data Collector",*DISPLAY_LABELS.values(),"Bedroom Light"]}
         migrated = whitelist_displays(config,[])
-        self.assertEqual(migrated["whiteList"],["Kyuden Data Collector","Bedroom Light","Hour Avg","Yesterday"])
-        self.assertTrue(all(name.isascii() and len(name)<=9 for name in DISPLAYS.values()))
+        self.assertEqual(migrated["whiteList"],["Kyuden Data Collector","Bedroom Light",*DISPLAYS.values()])
+        self.assertTrue(all(name.isascii() and len(name)<=9 for name in DISPLAY_LABELS.values()))
+
+    def test_display_label_changes_never_change_bridge_identity_names(self):
+        before = discovery_messages("kyuden","homeassistant")
+        with patch.dict(DISPLAY_LABELS,{"recent_hour":"Another client label"}):
+            self.assertEqual(before,discovery_messages("kyuden","homeassistant"))
+        self.assertEqual(DISPLAYS,{"recent_hour":"Kyuden 最近小时均功率","yesterday":"Kyuden 昨日用电〔W即度数〕"})
 
     def test_setup_refuses_to_override_area_filter_or_explicit_blacklist(self):
         with self.assertRaises(ValueError):

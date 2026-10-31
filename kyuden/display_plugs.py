@@ -8,12 +8,14 @@ from pathlib import Path
 
 from .parsing import JST
 
-DISPLAYS = {
+DISPLAY_LABELS = {
     "recent_hour": "Hour Avg",
     "yesterday": "Yesterday",
 }
 
-LEGACY_DISPLAY_NAMES = {
+# Frozen bridge identity names: matterbridge-hass 1.6 constructs endpoint.id
+# from deviceName, NOT serialNumber. Rename only in the Apple Home client.
+DISPLAYS = {
     "recent_hour": "Kyuden 最近小时均功率",
     "yesterday": "Kyuden 昨日用电〔W即度数〕",
 }
@@ -97,7 +99,8 @@ def state_messages(db_path, base_topic, now=None):
     for key in DISPLAYS:
         prefix = f"{base_topic}/display/{key}"
         value, available, details = values.get(key, (None, False, {"reason": "source_missing"}))
-        details.update({"display_only": True, "published_at": now.isoformat()})
+        details.update({"display_only": True, "published_at": now.isoformat(),
+                        "home_name_hint": DISPLAY_LABELS[key]})
         if not available:
             messages.append((f"{prefix}/availability", "offline"))
         messages += [(f"{prefix}/outlet/state", "ON"),
