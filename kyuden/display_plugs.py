@@ -9,6 +9,11 @@ from pathlib import Path
 from .parsing import JST
 
 DISPLAYS = {
+    "recent_hour": "Hour Avg",
+    "yesterday": "Yesterday",
+}
+
+LEGACY_DISPLAY_NAMES = {
     "recent_hour": "Kyuden 最近小时均功率",
     "yesterday": "Kyuden 昨日用电〔W即度数〕",
 }
@@ -33,7 +38,7 @@ def discovery_messages(base_topic, discovery_prefix):
             "payload_on": "ON", "payload_off": "OFF", "retain": False,
         }
         power = {
-            **common, "name": "显示功率", "unique_id": f"kyuden_display_{key}_power",
+            **common, "name": "Display Power", "unique_id": f"kyuden_display_{key}_power",
             "default_entity_id": f"sensor.kyuden_display_{key}_power",
             "state_topic": f"{prefix}/power_w", "device_class": "power",
             "state_class": "measurement",

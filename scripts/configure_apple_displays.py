@@ -16,7 +16,7 @@ from urllib.parse import urlparse, urlunparse
 from websockets.sync.client import connect
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kyuden.display_plugs import DISPLAYS
+from kyuden.display_plugs import DISPLAYS, LEGACY_DISPLAY_NAMES
 
 
 class RPC:
@@ -51,7 +51,8 @@ def whitelist_displays(config, entities):
         raise ValueError("Existing area/label filter requires manual review; nothing changed")
     # An empty whitelist means ALL existing devices; don't narrow it accidentally.
     if updated.get("whiteList"):
-        updated["whiteList"] = list(dict.fromkeys([*updated["whiteList"], *DISPLAYS.values()]))
+        kept = [name for name in updated["whiteList"] if name not in LEGACY_DISPLAY_NAMES.values()]
+        updated["whiteList"] = list(dict.fromkeys([*kept, *DISPLAYS.values()]))
     if updated.get("entityWhiteList"):
         updated["entityWhiteList"] = list(dict.fromkeys([*updated["entityWhiteList"], *entities]))
     for name in DISPLAYS.values():
@@ -67,6 +68,7 @@ def main():
     parser.add_argument("--matterbridge-url", required=True, help="Local http(s) URL, no embedded credentials")
     parser.add_argument("--ha-url", help="Reachable URL of the SAME HA instance if plugin uses add-on-internal DNS")
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--no-restart", action="store_true", help="Save config only; use a normal service restart separately")
     parser.add_argument("--backup-dir", default="secrets/display-backups")
     args = parser.parse_args()
     parsed = urlparse(args.matterbridge_url)
@@ -105,6 +107,10 @@ def main():
                 if not owned:
                     raise RuntimeError("Entity is not owned by a Kyuden display device; stopping")
             ids = [e["entity_id"] for e in entities]
+            owned_ids = {e["device_id"] for e in entities}
+            if any(device_id not in owned_ids and (device.get("name_by_user") or device.get("name")) in DISPLAYS.values()
+                   for device_id, device in devices.items()):
+                raise ValueError("Display name conflicts with another device; nothing changed")
             updated = whitelist_displays(config, ids)
             print("Display entities:", ids)
             print("Whitelist additions:", [n for n in updated.get("whiteList", []) if n not in config.get("whiteList", [])])
@@ -129,8 +135,11 @@ def main():
                 saved = next(p["configJson"] for p in mb.call("/api/plugins") if p["name"] == "matterbridge-hass")
                 if any(saved.get(k) != v for k, v in updated.items()):
                     raise RuntimeError("Saved configuration differs; inspect backup before proceeding")
-                mb.call("/api/restartplugin", pluginName="matterbridge-hass")
-                print("HA plugin restart requested; no bridge reset, no physical device commands")
+                if not args.no_restart:
+                    mb.call("/api/restartplugin", pluginName="matterbridge-hass")
+                    print("HA plugin restart requested; no bridge reset, no physical device commands")
+                else:
+                    print("Config saved; no restart requested")
             else:
                 print("Whitelist already configured; plugin not restarted")
 

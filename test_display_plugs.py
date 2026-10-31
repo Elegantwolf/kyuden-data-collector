@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from kyuden.display_plugs import discovery_messages, state_messages
+from kyuden.display_plugs import DISPLAYS, LEGACY_DISPLAY_NAMES, discovery_messages, state_messages
 from kyuden.ha import HomeAssistantReporter, MQTTConfig
 from kyuden.parsing import JST
 from kyuden.storage import KyudenSQLite
@@ -99,6 +99,12 @@ class DisplayPlugTests(unittest.TestCase):
 
     def test_empty_whitelist_keeps_its_existing_all_devices_semantics(self):
         self.assertEqual(whitelist_displays({"whiteList":[]},[])["whiteList"],[])
+
+    def test_short_english_names_migrate_only_our_old_whitelist_entries(self):
+        config = {"whiteList":["Kyuden Data Collector",*LEGACY_DISPLAY_NAMES.values(),"Bedroom Light"]}
+        migrated = whitelist_displays(config,[])
+        self.assertEqual(migrated["whiteList"],["Kyuden Data Collector","Bedroom Light","Hour Avg","Yesterday"])
+        self.assertTrue(all(name.isascii() and len(name)<=9 for name in DISPLAYS.values()))
 
     def test_setup_refuses_to_override_area_filter_or_explicit_blacklist(self):
         with self.assertRaises(ValueError):

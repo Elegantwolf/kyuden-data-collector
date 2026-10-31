@@ -62,13 +62,16 @@ Apple Home 不显示桥接后的独立 `electricalSensor`，因此采集器还�
 KYUDEN_APPLE_DISPLAY_PLUGS=true
 ```
 
-- `Kyuden 最近小时均功率`：最近一个已结束、已经采到的小时电量 × 1000 W。
+- `Hour Avg`：最近一个已结束、已经采到的小时电量 × 1000 W。
   如 0.35 kWh → 350 W；不是当前实时功率。数据区间和采集时间保存在 HA 实体属性。
-- `Kyuden 昨日用电〔W即度数〕`：昨天的日结 kWh 数字直接编码为 W。
+- `Yesterday`：昨天的日结 kWh 数字直接编码为 W。
   如 6.7 kWh → 6.7 W；**仅显示编码，不是真实功率**，不要用于自动化/计费。
 
 两个设备各有独立 identifiers、虚拟 outlet 和 power sensor；命令发布到专属且无消费者
 的 `kyuden/display/.../outlet/set`，不关联任何真实灯、插座或继电器。
+英文短名不改变 identifiers、entity_id、数值含义或配对。辅助配置工具仅将白名单中
+本功能的旧中文长名替换为英文短名；若短名与其他 HA 设备冲突则停止。可用
+`--no-restart` 仅保存配置，之后按后台正常服务重启流程应用，避免插件热重载卡住。
 Matterbridge-hass 要求功率传感器声明 `state_class: measurement` 才创建电气测量 cluster。
 因此 HA 可能为这两个新 W 实体保存独立的短期/长期均值历史；昨天实体的历史仅是显示编码，
 不是物理功率。它们不提供虚构 energy，不改写既有 kWh 统计，不自动加入 Energy Dashboard，
