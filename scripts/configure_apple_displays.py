@@ -65,6 +65,7 @@ def whitelist_displays(config, entities):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--matterbridge-url", required=True, help="Local http(s) URL, no embedded credentials")
+    parser.add_argument("--ha-url", help="Reachable URL of the SAME HA instance if plugin uses add-on-internal DNS")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--backup-dir", default="secrets/display-backups")
     args = parser.parse_args()
@@ -79,7 +80,9 @@ def main():
         print("Matterbridge HA plugin:", plugin["version"], "loaded:", plugin.get("loaded"))
         # Reuse the existing HA connection in memory. Never log or copy its token
         # into arguments/environment/git, and do not create a new credential.
-        ha_url = urlparse(config["host"])
+        ha_url = urlparse(args.ha_url or config["host"])
+        if ha_url.scheme not in ("http", "https", "ws", "wss") or not ha_url.netloc or ha_url.username is not None:
+            raise ValueError("Use --ha-url with the reachable URL of the same HA instance")
         ha_ws_url = urlunparse(("wss" if ha_url.scheme in ("https", "wss") else "ws",
                                ha_url.netloc, "/api/websocket", "", "", ""))
         with connect(ha_ws_url, open_timeout=10) as ha_ws:
