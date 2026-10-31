@@ -58,19 +58,22 @@ class DisplayPlugTests(unittest.TestCase):
         self.add_rows(hourly=[{"date":"2026-11-01","hour":0,"usage_kwh":1,"timestamp":"2026-10-30T00:00:00+09:00"}])
         self.assertEqual(dict(state_messages(self.path,"kyuden",self.now))["kyuden/display/recent_hour/availability"],"offline")
 
-    def test_distinct_devices_no_statistics_and_isolated_commands(self):
+    def test_distinct_devices_no_energy_statistics_and_isolated_commands(self):
         configs = {k:json.loads(v) for k,v in discovery_messages("kyuden","homeassistant")}
         self.assertEqual(len(configs),4)
         ids = {tuple(v["device"]["identifiers"]) for v in configs.values()}
         self.assertEqual(len(ids),2)
         for topic,config in configs.items():
-            self.assertNotIn("state_class",config)
             self.assertNotIn("energy",topic)
             self.assertTrue(config["state_topic"].startswith("kyuden/display/"))
             if "/switch/" in topic:
                 self.assertEqual(config["device_class"],"outlet")
                 self.assertTrue(config["command_topic"].endswith("/outlet/set"))
                 self.assertFalse(config["optimistic"])
+            else:
+                self.assertEqual(config["state_class"],"measurement")
+                self.assertEqual(config["device_class"],"power")
+                self.assertEqual(config["unit_of_measurement"],"W")
 
     def test_disabled_by_default(self):
         reporter = HomeAssistantReporter(MQTTConfig(host="unused"))

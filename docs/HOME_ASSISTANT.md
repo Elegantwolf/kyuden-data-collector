@@ -69,7 +69,10 @@ KYUDEN_APPLE_DISPLAY_PLUGS=true
 
 两个设备各有独立 identifiers、虚拟 outlet 和 power sensor；命令发布到专属且无消费者
 的 `kyuden/display/.../outlet/set`，不关联任何真实灯、插座或继电器。
-传感器不声明 state_class、不提供虚构 energy，不参与 HA 长期统计或 Energy Dashboard。
+Matterbridge-hass 要求功率传感器声明 `state_class: measurement` 才创建电气测量 cluster。
+因此 HA 可能为这两个新 W 实体保存独立的短期/长期均值历史；昨天实体的历史仅是显示编码，
+不是物理功率。它们不提供虚构 energy，不改写既有 kWh 统计，不自动加入 Energy Dashboard，
+也不要对它们做功率积分或用于真实能耗计算。
 缺昨天日结时不可用，不回退到前天；近期数据区间/采集时间过期也不可用，不伪造零。
 连续三小时未收到刷新，power sensor 在 HA 中过期。日结数据每天自然切换。
 

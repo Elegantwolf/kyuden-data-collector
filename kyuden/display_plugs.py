@@ -36,10 +36,11 @@ def discovery_messages(base_topic, discovery_prefix):
             **common, "name": "显示功率", "unique_id": f"kyuden_display_{key}_power",
             "default_entity_id": f"sensor.kyuden_display_{key}_power",
             "state_topic": f"{prefix}/power_w", "device_class": "power",
+            "state_class": "measurement",
             "unit_of_measurement": "W", "expire_after": 10800,
             "json_attributes_topic": f"{prefix}/details",
-            # Intentionally NO state_class: encoded yesterday values must not
-            # become HA long-term statistics or Energy Dashboard inputs.
+            # Matterbridge-hass requires measurement to build the electrical
+            # cluster. These isolated W histories are NOT kWh/energy statistics.
         }
         for component, suffix, payload in (("switch", "outlet", switch), ("sensor", "power", power)):
             messages.append((f"{discovery_prefix}/{component}/kyuden_display/{key}_{suffix}/config",
