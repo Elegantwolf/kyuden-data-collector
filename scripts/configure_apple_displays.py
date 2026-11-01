@@ -16,7 +16,7 @@ from urllib.parse import urlparse, urlunparse
 from websockets.sync.client import connect
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kyuden.display_plugs import DISPLAYS, DISPLAY_LABELS
+from kyuden.display_plugs import DISPLAYS, LEGACY_DISPLAY_NAMES
 
 
 class RPC:
@@ -51,9 +51,8 @@ def whitelist_displays(config, entities):
         raise ValueError("Existing area/label filter requires manual review; nothing changed")
     # An empty whitelist means ALL existing devices; don't narrow it accidentally.
     if updated.get("whiteList"):
-        # Retire the accidental English identity names; restore the original
-        # stable names so Matter storage assigns the original endpoint numbers.
-        kept = [name for name in updated["whiteList"] if name not in DISPLAY_LABELS.values()]
+        # Retire only our legacy identities for the approved re-pair migration.
+        kept = [name for name in updated["whiteList"] if name not in LEGACY_DISPLAY_NAMES.values()]
         updated["whiteList"] = list(dict.fromkeys([*kept, *DISPLAYS.values()]))
     if updated.get("entityWhiteList"):
         updated["entityWhiteList"] = list(dict.fromkeys([*updated["entityWhiteList"], *entities]))
@@ -126,11 +125,11 @@ def main():
                 json.dump(config, out, ensure_ascii=False, indent=2)
             print("Protected configuration backup:", backup)
             areas = ha.call("config/area_registry/list")
-            area = next((a for a in areas if a["name"] == "用电信息"), None)
+            area = next((a for a in areas if a["name"] == "Energy"), None)
             if area is None:
-                area = ha.call("config/area_registry/create", name="用电信息")
+                area = ha.call("config/area_registry/create", name="Energy")
             for device_id in {e["device_id"] for e in entities}:
-                if not devices[device_id].get("area_id"):
+                if devices[device_id].get("area_id") != area["area_id"]:
                     ha.call("config/device_registry/update", device_id=device_id, area_id=area["area_id"])
             if updated != config:
                 mb.call("/api/savepluginconfig", pluginName="matterbridge-hass", formData=updated)

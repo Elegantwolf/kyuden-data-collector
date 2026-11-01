@@ -13,9 +13,15 @@ DISPLAY_LABELS = {
     "yesterday": "Yesterday",
 }
 
-# Frozen bridge identity names: matterbridge-hass 1.6 constructs endpoint.id
-# from deviceName, NOT serialNumber. Rename only in the Apple Home client.
+# Frozen identity names for the explicitly approved English re-pair migration.
+# matterbridge-hass derives endpoint identity from deviceName. Future cosmetic
+# changes belong in the controller; never rename these during normal publishing.
 DISPLAYS = {
+    "recent_hour": "Hour Avg",
+    "yesterday": "Yesterday",
+}
+
+LEGACY_DISPLAY_NAMES = {
     "recent_hour": "Kyuden 最近小时均功率",
     "yesterday": "Kyuden 昨日用电〔W即度数〕",
 }
@@ -28,7 +34,7 @@ def discovery_messages(base_topic, discovery_prefix):
         device = {
             "identifiers": [f"kyuden_display_{key}"], "name": name,
             "manufacturer": "Kyuden Collector", "model": "Display only — no physical relay",
-            "suggested_area": "用电信息",
+            "suggested_area": "Energy",
         }
         common = {"device": device, "availability_topic": f"{prefix}/availability"}
         switch = {

@@ -69,12 +69,13 @@ KYUDEN_APPLE_DISPLAY_PLUGS=true
 
 两个设备各有独立 identifiers、虚拟 outlet 和 power sensor；命令发布到专属且无消费者
 的 `kyuden/display/.../outlet/set`，不关联任何真实灯、插座或继电器。
-**内部桥接名称必须保持最初的中文名称不变。** matterbridge-hass 1.6 的 MutableDevice
+**重新配对迁移后，内部桥接名称固定为 `Hour Avg` 和 `Yesterday`。** matterbridge-hass 1.6 的 MutableDevice
 使用 `new MatterbridgeEndpoint(..., { id: this.deviceName })`；即使 HA device ID 和序列号
 不变，修改设备名也会换端点编号，使 Apple Home 丢失原卡片/房间绑定。
-英文短名 Hour Avg / Yesterday 只能在 Apple Home 配件设置中改，不改 HA/MQTT 设备名、
-name_by_user 或插件命名后缀。辅助配置工具会撤销本功能误加入白名单的英文身份名称，
-恢复原始内部名；不会修改其他设备。可用
+2026-11-01 用户授权仅重新配对用电桥，并将初始名称改为上述英文短名。
+这是一次有意改变桥接身份的迁移，不能作为普通在线改名操作重复执行。
+后续不改 HA/MQTT 设备名、name_by_user 或插件命名后缀。
+辅助配置工具仅从白名单移除本功能旧中文身份名称，保留其他设备。可用
 `--no-restart` 仅保存配置，之后按后台正常服务重启流程应用，避免插件热重载卡住。
 Matterbridge-hass 要求功率传感器声明 `state_class: measurement` 才创建电气测量 cluster。
 因此 HA 可能为这两个新 W 实体保存独立的短期/长期均值历史；昨天实体的历史仅是显示编码，
@@ -94,7 +95,7 @@ python -m kyuden --publish-displays-only --db data/kyuden.sqlite
 不改数据库、不更新“最后采集”或采集成功状态、不操作原 Power Meter。
 
 现有 Matterbridge-hass 可将每个新 HA 设备的 switch 和 power 合并暴露。
-辅助配置脚本默认只检查；--apply 才创建 HA“用电信息”区域、将两个设备加入
+辅助配置脚本默认只检查；--apply 才创建 HA“Energy”区域、将两个显示设备移入该区域并加入
 **现有白名单**并只重启 HA 插件，不重置桥、不修改配对，不改变已有实体。
 脚本在内存中复用该插件既有 HA 连接配置，不新建令牌；应用前保存含凭据的
 config 备份到 `secrets/display-backups`，权限 600，禁止上传。
@@ -116,7 +117,7 @@ ElectricalSensor (0x0510) 和 ElectricalPowerMeasurement.activePower。
 **不要使用 reset/factory reset 或反复重配整个桥**。
 
 Apple Home 的设备命名、小数显示及卡片更新需手机实测。HA 区域不保证自动变成
-Apple Home 房间，请在家庭 App 将这两个设备放到单独的“用电信息”房间。
+Apple Home 房间，请在家庭 App 的初次添加流程将桥和两个设备放到“Energy”房间。
 **两个显示值可能混入 Apple Home 家庭/房间的功率汇总，该汇总不能再当成物理功率。**
 不应将整屋读数与分项读数一起用于真实统计。
 
