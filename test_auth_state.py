@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from collector import collector_lock
 from kyuden_scraper import AuthenticationRequiredError, KyudenScraper
@@ -19,6 +19,9 @@ class FakePage:
         return None
 
     async def wait_for_timeout(self, *_args, **_kwargs):
+        return None
+
+    async def wait_for_function(self, *_args, **_kwargs):
         return None
 
 
@@ -41,6 +44,26 @@ class AuthenticationStateTests(unittest.IsolatedAsyncioTestCase):
         scraper.page = FakePage("https://id.kyuden.co.jp/login")
 
         self.assertFalse(await scraper.is_logged_in())
+
+    async def test_authorization_page_is_not_a_login_prompt(self):
+        scraper = KyudenScraper()
+        scraper.page = FakePage("https://id.kyuden.co.jp/connect/authorize")
+        scraper.page.wait_for_function = AsyncMock(side_effect=TimeoutError())
+        scraper._notify_alert = AsyncMock()
+        with patch("kyuden.scraper.asyncio.sleep", new=AsyncMock()):
+            with self.assertRaises(LoginCheckError):
+                await scraper.ensure_logged_in(None, None, allow_password_login=False)
+        self.assertEqual(scraper.page.wait_for_function.await_count, 2)
+        scraper._notify_alert.assert_not_awaited()
+
+    async def test_authorization_redirect_can_finish_in_same_attempt(self):
+        scraper = KyudenScraper()
+        scraper.page = FakePage("https://id.kyuden.co.jp/connect/authorize")
+        async def finish_redirect(*_args, **_kwargs):
+            scraper.page.url = scraper.account_url
+        scraper.page.wait_for_function = AsyncMock(side_effect=finish_redirect)
+        self.assertTrue(await scraper.is_logged_in())
+        scraper.page.wait_for_function.assert_awaited_once()
 
     async def test_error_page_does_not_prove_auth_expiry(self):
         scraper = KyudenScraper(browser_channel=None)

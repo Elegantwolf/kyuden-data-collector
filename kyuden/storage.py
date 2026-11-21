@@ -22,7 +22,12 @@ DDL_STATEMENTS = [
         PRIMARY KEY (date, hour)
     );
     """,
-    # 可选索引（主键已覆盖最常见查询）
+    """
+    CREATE TABLE IF NOT EXISTS daily_collection_attempt (
+        target_date TEXT PRIMARY KEY,
+        attempted_at TEXT NOT NULL
+    );
+    """,
 ]
 
 def _to_iso_date(v: Any) -> str:

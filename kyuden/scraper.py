@@ -155,13 +155,20 @@ class KyudenScraper:
         for attempt in range(2):
             try:
                 await self.page.goto(self.login_url, wait_until="domcontentloaded", timeout=30000)
-                # Let the client-side authentication redirect settle.
-                await self.page.wait_for_timeout(2500)
+                await self.page.wait_for_function(
+                    r"""() => (location.hostname === 'my.kyuden.co.jp' &&
+                              location.pathname.replace(/\/$/, '').endsWith('/member/account')) ||
+                             (location.hostname === 'id.kyuden.co.jp' &&
+                              location.pathname.replace(/\/$/, '') === '/login' &&
+                              !!document.querySelector('input[type="password"]'))""",
+                    timeout=15000,
+                )
                 parsed = urlparse(self.page.url)
                 logger.info("登录状态检查落点: %s%s", parsed.hostname, parsed.path)
-                if parsed.hostname == "id.kyuden.co.jp":
+                path = parsed.path.rstrip("/")
+                if parsed.hostname == "id.kyuden.co.jp" and path == "/login":
                     return False
-                if parsed.hostname == "my.kyuden.co.jp" and parsed.path.endswith("/member/account"):
+                if parsed.hostname == "my.kyuden.co.jp" and path.endswith("/member/account"):
                     return True
                 raise LoginCheckError("登录检查进入非账户页面，不能判定登录失效")
             except Exception as exc:
@@ -444,6 +451,7 @@ class KyudenScraper:
         max_login_retries: Optional[int] = None,
         alert_handler: Optional[Callable[[str, Dict[str, Any]], Union[None, Awaitable[None]]]] = None,
         hourly_backfill_dates=(),
+        retry_daily=False,
     ):
         """
         完整爬取流程
@@ -491,6 +499,12 @@ class KyudenScraper:
                 hourly_data = await self.get_hourly_usage_data(
                     target_date=target_date_obj, backfill_dates=hourly_backfill_dates,
                 )
+            if retry_daily and mode == 'hourly':
+                try:
+                    daily_data = await self.get_daily_usage_data()
+                except Exception as exc:
+                    logger.warning("日结补采暂未完成（%s），保留本次小时数据", type(exc).__name__)
+                    daily_data = []
 
             self.save(
                 daily=daily_data if mode!='hourly' else None,

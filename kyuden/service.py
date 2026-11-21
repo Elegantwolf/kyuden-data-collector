@@ -10,6 +10,24 @@ from .scraper import KyudenScraper
 from .storage import KyudenSQLite
 
 logger = logging.getLogger(__name__)
+DAILY_RETRY_INTERVAL = timedelta(hours=3)
+
+
+def daily_retry_due(db_path, target_date, now):
+    path = Path(db_path)
+    if not path.exists():
+        return True
+    with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
+        if conn.execute("SELECT 1 FROM daily_usage WHERE date = ?", (target_date,)).fetchone():
+            return False
+        if not conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'daily_collection_attempt'"
+        ).fetchone():
+            return True
+        attempt = conn.execute(
+            "SELECT attempted_at FROM daily_collection_attempt WHERE target_date = ?", (target_date,)
+        ).fetchone()
+        return attempt is None or now >= datetime.fromisoformat(attempt[0]) + DAILY_RETRY_INTERVAL
 
 
 def plan_hourly_backfill(db_path, mode, backfill_days=0, today=None):
@@ -45,6 +63,9 @@ async def run_collect(
     backfill_days=0,
     statistics_reporter=None,
 ):
+    now = datetime.now(JST)
+    yesterday = (now.date() - timedelta(days=1)).isoformat()
+    retry_daily = mode == "hourly" and not hourly_target_date and daily_retry_due(db_path, yesterday, now)
     scraper = KyudenScraper(
         profile_dir=profile_dir,
         alert_handler=alert_handler,
@@ -62,6 +83,7 @@ async def run_collect(
         allow_password_login=False,
         hourly_backfill_dates=plan_hourly_backfill(db_path, mode, backfill_days)
         if not hourly_target_date else (),
+        retry_daily=retry_daily,
     )
 
     expected = ("daily", "hourly") if mode == "both" else (mode,)
@@ -77,6 +99,23 @@ async def run_collect(
         n1 = db.upsert_daily(daily_rows) if daily_rows else 0
         n2 = db.upsert_hourly(hourly_rows) if hourly_rows else 0
         logger.info(f"upsert daily={n1}, hourly={n2}")
+        if mode in ("daily", "both") or retry_daily:
+            db.conn.execute(
+                "INSERT OR REPLACE INTO daily_collection_attempt VALUES (?, ?)",
+                (yesterday, now.isoformat()),
+            )
+            has_yesterday = db.conn.execute(
+                "SELECT 1 FROM daily_usage WHERE date = ?", (yesterday,)
+            ).fetchone() is not None
+        else:
+            has_yesterday = True
+
+    if not has_yesterday:
+        message = f"九电日结缺少目标日期 {yesterday}，等待下次补采"
+        if mode in ("daily", "both"):
+            # Historical rows and hourly readings are already saved.
+            raise ValueError(message)
+        logger.warning("%s", message)
 
     if statistics_reporter:
         await statistics_reporter.publish(db_path)
