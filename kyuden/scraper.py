@@ -155,6 +155,8 @@ class KyudenScraper:
         for attempt in range(2):
             try:
                 await self.page.goto(self.login_url, wait_until="domcontentloaded", timeout=30000)
+                # The login form can briefly render before automatic SSO redirects.
+                await self.page.wait_for_timeout(2500)
                 await self.page.wait_for_function(
                     r"""() => (location.hostname === 'my.kyuden.co.jp' &&
                               location.pathname.replace(/\/$/, '').endsWith('/member/account')) ||
@@ -172,7 +174,9 @@ class KyudenScraper:
                     return True
                 raise LoginCheckError("登录检查进入非账户页面，不能判定登录失效")
             except Exception as exc:
-                logger.warning("登录检查暂时失败 (%s/2): %s", attempt + 1, type(exc).__name__)
+                landing = urlparse(self.page.url)
+                logger.warning("登录检查暂时失败 (%s/2): %s，落点 %s%s",
+                               attempt + 1, type(exc).__name__, landing.hostname or "", landing.path)
                 if attempt == 1:
                     raise LoginCheckError("九电登录检查不可用，请稍后重试；保留现有登录凭据") from exc
                 await asyncio.sleep(3)
