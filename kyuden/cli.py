@@ -30,6 +30,8 @@ def main():
     parser.add_argument("-m", "--mode", choices=["daily", "hourly", "both"], default="hourly")
     parser.add_argument("--hourly-date", help="真实小时页面目标日期（YYYY-MM-DD，最近 62 天）")
     parser.add_argument("--backfill-days", type=int, default=0, help="额外回填最近 N 个完整日期，0..62")
+    parser.add_argument("--skip-existing-daily", action="store_true",
+                        help="日结模式下，昨日日结已入库时只回填小时数据")
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="SQLite 文件路径")
     parser.add_argument("--publish-displays-only", action="store_true",
                         help="仅从已有 SQLite 更新虚拟显示插座，不爬取、不改 SQLite/采集成功时间")
@@ -93,6 +95,7 @@ def main():
                     ha_reporter=ha_reporter,
                     backfill_days=args.backfill_days,
                     statistics_reporter=StatisticsReporter(statistics_config) if statistics_config else None,
+                    skip_existing_daily=args.skip_existing_daily,
                 )
             )
             return 0

@@ -62,9 +62,17 @@ async def run_collect(
     ha_reporter=None,
     backfill_days=0,
     statistics_reporter=None,
+    skip_existing_daily=False,
 ):
     now = datetime.now(JST)
     yesterday = (now.date() - timedelta(days=1)).isoformat()
+    collect_mode = mode
+    if mode == "daily" and skip_existing_daily and Path(db_path).exists():
+        db_uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(db_uri, uri=True)) as conn:
+            if conn.execute("SELECT 1 FROM daily_usage WHERE date = ?", (yesterday,)).fetchone():
+                collect_mode = "hourly"
+                logger.info("目标日结 %s 已入库，跳过日结页面，继续小时回填", yesterday)
     retry_daily = mode == "hourly" and not hourly_target_date and daily_retry_due(db_path, yesterday, now)
     scraper = KyudenScraper(
         profile_dir=profile_dir,
@@ -75,18 +83,18 @@ async def run_collect(
     result = await scraper.scrape(
         username=None,
         password=None,
-        mode=mode,
+        mode=collect_mode,
         save_format="none",              # 只拿内存数据
         headless=headless,
         hourly_target_date=hourly_target_date,
         profile_dir=profile_dir,
         allow_password_login=False,
-        hourly_backfill_dates=plan_hourly_backfill(db_path, mode, backfill_days)
+        hourly_backfill_dates=plan_hourly_backfill(db_path, mode, backfill_days, today=now.date())
         if not hourly_target_date else (),
         retry_daily=retry_daily,
     )
 
-    expected = ("daily", "hourly") if mode == "both" else (mode,)
+    expected = ("daily", "hourly") if collect_mode == "both" else (collect_mode,)
     if any(key not in result or not isinstance(result[key], list) for key in expected):
         raise ValueError("采集结果缺少请求的数据集")
     daily_rows = result.get("daily") or []
@@ -99,7 +107,7 @@ async def run_collect(
         n1 = db.upsert_daily(daily_rows) if daily_rows else 0
         n2 = db.upsert_hourly(hourly_rows) if hourly_rows else 0
         logger.info(f"upsert daily={n1}, hourly={n2}")
-        if mode in ("daily", "both") or retry_daily:
+        if collect_mode in ("daily", "both") or retry_daily:
             db.conn.execute(
                 "INSERT OR REPLACE INTO daily_collection_attempt VALUES (?, ?)",
                 (yesterday, now.isoformat()),

@@ -9,6 +9,32 @@ from kyuden.export import save_results
 
 
 class ServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_scheduled_daily_skips_only_an_existing_target_and_still_backfills(self):
+        start = datetime(2026, 11, 27, 1, 5, tzinfo=JST)
+        yesterday = start.date() - timedelta(days=1)
+        daily = {"date": yesterday, "usage_kwh": 0}
+        hour = {"date": yesterday, "hour": 23, "usage_kwh": 0}
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("kyuden.service.KyudenScraper") as scraper, \
+                patch("kyuden.service.datetime", wraps=datetime) as clock:
+            path = Path(directory) / "usage.sqlite"
+            clock.now.return_value = start
+            scrape = scraper.return_value.scrape = AsyncMock(side_effect=[
+                {"daily": [daily], "hourly": [hour]},
+                {"hourly": [hour]},
+                {"daily": [daily], "hourly": [hour]},
+            ])
+            ha = AsyncMock()
+            for skip_existing in (True, True, False):
+                await run_collect("daily", None, path, "unused", True,
+                                  ha_reporter=ha, skip_existing_daily=skip_existing)
+            self.assertEqual([call.kwargs["mode"] for call in scrape.await_args_list],
+                             ["daily", "hourly", "daily"])
+            self.assertIn(yesterday, scrape.await_args_list[1].kwargs["hourly_backfill_dates"])
+            self.assertFalse(scrape.await_args_list[1].kwargs["retry_daily"])
+            self.assertEqual(ha.publish_success.await_args_list[1].args,
+                             (path, "daily", {"daily": 0, "hourly": 1}))
+
     async def test_missing_dataset_does_not_open_database(self):
         with patch("kyuden.service.KyudenScraper") as scraper, patch("kyuden.service.KyudenSQLite") as db:
             scraper.return_value.scrape = AsyncMock(return_value={})

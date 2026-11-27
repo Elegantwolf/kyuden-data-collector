@@ -28,5 +28,10 @@ if [[ -f "$PROJECT_DIR/secrets/kyuden.env" ]]; then
   set +a
 fi
 
-exec "$PROJECT_DIR/.venv/bin/python" -m kyuden --mode "$MODE" \
+COLLECT_ARGS=(--mode "$MODE")
+if [[ "$MODE" == "daily" ]]; then
+  COLLECT_ARGS+=(--skip-existing-daily)
+fi
+
+exec "$PROJECT_DIR/.venv/bin/python" -m kyuden "${COLLECT_ARGS[@]}" \
   --db "$PROJECT_DIR/data/kyuden.sqlite" >> "$LOG_FILE" 2>&1
